@@ -10,14 +10,19 @@ RUN npm run build
 FROM nginx:alpine
 WORKDIR /usr/share/nginx/html
 
+# Install wget for healthcheck
+RUN apk add --no-cache wget
+
 # Remove default nginx content
 RUN rm -rf /usr/share/nginx/html/*
 
-# Copy built assets
-COPY --from=build /app/dist .
+# Copy built assets (Vite outDir is configured as "build" in vite.config.js)
+# Use /app/build instead of /app/dist so the COPY matches the actual build output.
+COPY --from=build /app/build .
 
-# Copy nginx config
+# Copy nginx configs
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY websocket.conf /etc/nginx/conf.d/websocket.conf
 
 EXPOSE 80
 

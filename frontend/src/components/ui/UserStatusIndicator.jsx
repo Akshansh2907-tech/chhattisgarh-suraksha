@@ -1,43 +1,15 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import Icon from '../AppIcon';
 import Button from './Button';
-import { userAPI } from '../../utils/api';
+import { useAuth } from '../../contexts/AuthContext';
 
 const UserStatusIndicator = () => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
-
-  // Real user data fetched from API
-  const [currentUser, setCurrentUser] = useState(null);
-
-  useEffect(() => {
-    let mounted = true;
-    const loadProfile = async () => {
-      try {
-        const resp = await userAPI.getProfile();
-        // Backend returns a profile object - adapt to expected shape
-        if (mounted && resp?.data) {
-          const p = resp.data;
-          setCurrentUser({
-            name: p.name || p.full_name || p.name || 'Unknown',
-            email: p.email || '',
-            role: p.userType || 'Citizen',
-            avatar: p.avatar || null,
-            status: 'online',
-            lastActive: new Date(p.joinDate || Date.now()),
-            permissions: p.permissions || []
-          });
-        }
-      } catch (err) {
-        console.warn('Failed to load user profile for UserStatusIndicator:', err);
-        // keep null - UI falls back to generic placeholder
-      }
-    };
-
-    loadProfile();
-    return () => { mounted = false; };
-  }, []);
+  const { user, loading, logout } = useAuth();
+  const navigate = useNavigate();
+  const [browserPermissions, setBrowserPermissions] = React.useState([]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -82,11 +54,47 @@ const UserStatusIndicator = () => {
     }
   };
 
-  const handleLogout = () => {
-    // In real app, this would call auth logout function
-    console.log('Logging out...');
+  const handleLogout = async () => {
     setIsDropdownOpen(false);
+    try {
+      await logout();
+    } catch (e) {
+      console.error('Logout failed', e);
+    }
   };
+
+  // Query browser permissions for common items and show to user
+  useEffect(() => {
+    let mounted = true;
+    const permsToCheck = [
+      { key: 'geolocation', label: 'Location' },
+      { key: 'notifications', label: 'Notifications' },
+      { key: 'camera', label: 'Camera' },
+      { key: 'microphone', label: 'Microphone' }
+    ];
+
+    const runQuery = async () => {
+      const results = [];
+      for (const p of permsToCheck) {
+        try {
+          if (navigator.permissions && navigator.permissions.query) {
+            const status = await navigator.permissions.query({ name: p.key });
+            results.push({ key: p.key, label: p.label, state: status.state });
+          } else {
+            results.push({ key: p.key, label: p.label, state: 'unknown' });
+          }
+        } catch (err) {
+          // Some permissions (camera/microphone) may throw; mark as unknown
+          results.push({ key: p.key, label: p.label, state: 'unknown' });
+        }
+      }
+
+      if (mounted) setBrowserPermissions(results);
+    };
+
+    runQuery();
+    return () => { mounted = false; };
+  }, []);
 
   return (
     <div className="relative" ref={dropdownRef}>
@@ -95,23 +103,23 @@ const UserStatusIndicator = () => {
         onClick={() => setIsDropdownOpen(!isDropdownOpen)}
         className="flex items-center space-x-2 p-2"
       >
-        <div className="relative">
-          {currentUser?.avatar ? (
+          <div className="relative">
+          {user?.avatar ? (
             <img
-              src={currentUser?.avatar}
-              alt={currentUser?.name}
+              src={user?.avatar}
+              alt={user?.name}
               className="w-8 h-8 rounded-full object-cover"
             />
           ) : (
             <div className="w-8 h-8 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-sm font-medium">
-              {getInitials(currentUser?.name || 'User')}
+              {getInitials(user?.name || 'User')}
             </div>
           )}
-          <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-background ${getStatusColor(currentUser?.status)}`} />
+          <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-background ${getStatusColor(user?.status)}`} />
         </div>
         <div className="hidden lg:block text-left">
-          <div className="text-sm font-medium text-foreground">{currentUser?.name || 'Guest'}</div>
-          <div className="text-xs text-muted-foreground">{currentUser?.role || ''}</div>
+          <div className="text-sm font-medium text-foreground">{user?.name || (loading ? 'Loading...' : 'Guest')}</div>
+          <div className="text-xs text-muted-foreground">{user?.role || ''}</div>
         </div>
         <Icon name="ChevronDown" size={16} className={`transition-transform duration-200 ${isDropdownOpen ? 'rotate-180' : ''}`} />
       </Button>
@@ -121,90 +129,77 @@ const UserStatusIndicator = () => {
           <div className="p-4 border-b border-border">
             <div className="flex items-center space-x-3">
               <div className="relative">
-                {currentUser?.avatar ? (
+                {user?.avatar ? (
                   <img
-                    src={currentUser?.avatar}
-                    alt={currentUser?.name}
+                    src={user?.avatar}
+                    alt={user?.name}
                     className="w-12 h-12 rounded-full object-cover"
                   />
                 ) : (
                   <div className="w-12 h-12 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-lg font-medium">
-                    {getInitials(currentUser?.name)}
+                    {getInitials(user?.name)}
                   </div>
                 )}
-                <div className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-background ${getStatusColor(currentUser?.status)}`} />
+                <div className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-background ${getStatusColor(user?.status)}`} />
               </div>
-              <div className="flex-1 min-w-0">
-                <h3 className="font-medium text-foreground truncate">{currentUser?.name}</h3>
-                <p className="text-sm text-muted-foreground truncate">{currentUser?.email}</p>
+            <div className="flex-1 min-w-0">
+                <h3 className="font-medium text-foreground truncate">{user?.name}</h3>
+                <p className="text-sm text-muted-foreground truncate">{user?.email}</p>
                 <div className="flex items-center space-x-1 mt-1">
-                  <Icon name={getRoleIcon(currentUser?.role)} size={12} className="text-muted-foreground" />
-                  <span className="text-xs text-muted-foreground">{currentUser?.role}</span>
+                  <Icon name={getRoleIcon(user?.role)} size={12} className="text-muted-foreground" />
+                  <span className="text-xs text-muted-foreground">{user?.role}</span>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Quick Actions */}
-          <div className="p-2">
-            <Link
-              to="/user-profile"
-              onClick={() => setIsDropdownOpen(false)}
-              className="flex items-center space-x-3 w-full px-3 py-2 text-sm text-left hover:bg-muted rounded-md transition-colors duration-200"
-            >
-              <Icon name="User" size={16} className="text-muted-foreground" />
-              <span>View Profile</span>
-            </Link>
-
-            <button
-              onClick={() => setIsDropdownOpen(false)}
-              className="flex items-center space-x-3 w-full px-3 py-2 text-sm text-left hover:bg-muted rounded-md transition-colors duration-200"
-            >
-              <Icon name="Settings" size={16} className="text-muted-foreground" />
-              <span>Settings</span>
-            </button>
-
-            <button
-              onClick={() => setIsDropdownOpen(false)}
-              className="flex items-center space-x-3 w-full px-3 py-2 text-sm text-left hover:bg-muted rounded-md transition-colors duration-200"
-            >
-              <Icon name="Bell" size={16} className="text-muted-foreground" />
-              <span>Notifications</span>
-            </button>
-
-            <button
-              onClick={() => setIsDropdownOpen(false)}
-              className="flex items-center space-x-3 w-full px-3 py-2 text-sm text-left hover:bg-muted rounded-md transition-colors duration-200"
-            >
-              <Icon name="HelpCircle" size={16} className="text-muted-foreground" />
-              <span>Help & Support</span>
-            </button>
-          </div>
-
-          {/* Status & Permissions */}
+          {/* Status, Position & Permissions */}
           <div className="p-4 border-t border-border">
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div>
                 <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
                   Status
                 </div>
                 <div className="flex items-center space-x-2">
-                  <div className={`w-2 h-2 rounded-full ${getStatusColor(currentUser?.status)}`} />
-                  <span className="text-sm capitalize">{currentUser?.status}</span>
+                  <div className="w-2 h-2 rounded-full bg-success" />
+                  <span className="text-sm capitalize">online</span>
                 </div>
               </div>
 
               <div>
                 <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
-                  Permissions
+                  Community Position
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Icon name={user?.position?.icon || 'User'} size={16} className="text-primary" />
+                  <span className="text-sm font-medium text-foreground">{user?.position?.title || 'Citizen'}</span>
+                  {user?.position?.level && (
+                    <span className="text-xs text-muted-foreground">Level {user?.position?.level}</span>
+                  )}
+                </div>
+                {user?.position?.progress && (
+                  <div className="mt-1">
+                    <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-primary rounded-full transition-all duration-300"
+                        style={{ width: `${user.position.progress}%` }}
+                      />
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      {user?.position?.nextMilestone}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+                  Browser Permissions
                 </div>
                 <div className="flex flex-wrap gap-1">
-                  {currentUser?.permissions?.map((permission) => (
-                    <span
-                      key={permission}
-                      className="inline-flex items-center px-2 py-1 text-xs bg-muted text-muted-foreground rounded-md"
-                    >
-                      {permission?.replace('_', ' ')}
+                  {browserPermissions.map((p) => (
+                    <span key={p.key} className="inline-flex items-center px-2 py-1 text-xs bg-muted text-muted-foreground rounded-md">
+                      {p.label}: {p.state}
                     </span>
                   ))}
                 </div>

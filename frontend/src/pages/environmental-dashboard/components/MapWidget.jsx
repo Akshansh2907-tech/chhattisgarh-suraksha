@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
+import ReportMap from '../../../components/ReportMap';
+import { useNavigate } from 'react-router-dom';
 import { environmentalAPI } from '../../../utils/environmental';
 import { reportService } from '../../../utils/report';
 
@@ -12,6 +14,7 @@ const MapWidget = ({ metrics, loading, alerts = [] }) => {
   const [localMetrics, setLocalMetrics] = useState(metrics);
   const [reports, setReports] = useState([]);
   const iframeRef = useRef(null);
+  const navigate = useNavigate();
 
   const dataLayers = [
     { id: 'air_quality', name: 'Air Quality', icon: 'Wind', color: '#059669', value: metrics?.aqi, unit: 'AQI' },
@@ -77,9 +80,26 @@ const MapWidget = ({ metrics, loading, alerts = [] }) => {
   useEffect(() => {
     const fetchReports = async () => {
       try {
-        const reports = await reportService.getAllReports();
+        // Limit to Raipur area to reduce server load
+        const raipurBounds = [21.2, 81.55, 21.3, 81.7];
+        const reports = await reportService.getAllReports(raipurBounds);
         setReports(reports.map(report => {
-          const [lat, lon] = report.location.split(',').map(Number);
+          // report.location may be a string "lat,lon|address" or "lat,lon"
+          let lat = null, lon = null;
+          try {
+            if (typeof report.location === 'string') {
+              const locPart = report.location.split('|')[0];
+              const parts = locPart.split(',').map(Number);
+              lat = parts[0];
+              lon = parts[1];
+            } else if (report.location && report.location.latitude) {
+              lat = Number(report.location.latitude);
+              lon = Number(report.location.longitude || report.location.lng);
+            }
+          } catch (e) {
+            console.warn('Failed to parse report location', e);
+          }
+
           return {
             ...report,
             coordinates: { lat, lon }
@@ -126,19 +146,11 @@ const MapWidget = ({ metrics, loading, alerts = [] }) => {
               <Icon name="Loader2" size={24} />
             </div>
           </div>
-        ) : (
-          <iframe
-            ref={iframeRef}
-            width="100%"
-            height="100%"
-            loading="lazy"
-            title="Environmental Data Map"
-            referrerPolicy="no-referrer-when-downgrade"
-            src={buildMapSrc(center.lat, center.lon, zoom)}
-            className="border-0 transform-gpu"
-            style={{ transform: `rotate(${rotation}deg)` }}
-          />
-        )}
+            ) : (
+              <div className="h-full">
+                <ReportMap reports={reports} center={[center.lat, center.lon]} zoom={zoom} />
+              </div>
+            )}
         
         {/* Overlay Controls */}
         <div className="absolute top-4 right-4 bg-background/90 backdrop-blur-sm rounded-lg p-2 space-y-2">
@@ -203,7 +215,7 @@ const MapWidget = ({ metrics, loading, alerts = [] }) => {
             </div>
           </div>
           <div className="flex items-center space-x-3">
-            <button className="text-primary hover:text-primary/80 font-medium" onClick={() => window.open(`https://www.google.com/maps/@${center.lat},${center.lon},${zoom}z`, '_blank')}>
+            <button className="text-primary hover:text-primary/80 font-medium" onClick={() => navigate('/environmental-dashboard/map')}>
               View Full Map →
             </button>
             <Button variant="ghost" size="sm" onClick={async () => {

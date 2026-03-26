@@ -22,7 +22,7 @@ export const environmentalAPI = {
       }
 
       // Try backend first
-      const url = '/api/metrics/current' + (lat && lon ? `?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}` : '');
+      const url = '/metrics/current' + (lat && lon ? `?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}` : '');
       const res = await api.get(url);
       
       if (res?.data?.success && res?.data?.data) {
@@ -167,7 +167,7 @@ export const environmentalAPI = {
   // Get active alerts with caching
   getActiveAlerts: async () => {
     try {
-      const response = await api.get('/api/metrics/alerts');
+      const response = await api.get('/metrics/alerts');
       return response;
     } catch (error) {
       console.error('Failed to fetch alerts:', error);
@@ -178,7 +178,7 @@ export const environmentalAPI = {
   // Get historical metrics with error handling
   getMetricsHistory: async (type, duration) => {
     try {
-      const response = await api.get(`/api/metrics/history?type=${type}&duration=${duration}`);
+      const response = await api.get(`/metrics/history?type=${type}&duration=${duration}`);
       
       if (!response?.data?.success) {
         throw new Error('Invalid history response');
@@ -204,7 +204,7 @@ export const environmentalAPI = {
       metricsCache.data = null;
       metricsCache.timestamp = null;
       
-      const response = await api.post('/api/metrics/update');
+      const response = await api.post('/metrics/update');
       
       // Update cache with new data if available
       if (response?.data?.success && response?.data?.data) {

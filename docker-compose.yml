@@ -1,63 +1,137 @@
-version: '3.8'
-
 services:
   # PostgreSQL Database
   postgres:
     image: postgres:16-alpine
     container_name: cg-suraksha-db
+    restart: unless-stopped
     environment:
       POSTGRES_DB: chhattisgarh_suraksha
-      POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres123}
+      POSTGRES_USER: ${DB_USER:?DB_USER is required}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - app-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
       interval: 10s
       timeout: 5s
       retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # Backend API
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        NODE_ENV: production
     container_name: cg-suraksha-backend
+    restart: unless-stopped
+    command: node src/index.js
+    ports:
+      - "127.0.0.1:5000:5000"  # Only allow local access, use reverse proxy in production
     environment:
       NODE_ENV: production
       PORT: 5000
       DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres123}@postgres:5432/chhattisgarh_suraksha
-      JWT_SECRET: ${JWT_SECRET:-change_this_secret_in_production}
-      WAQI_API_KEY: ${WAQI_API_KEY}
-      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
-      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
-      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER}
+      JWT_SECRET: ${JWT_SECRET:-your_jwt_secret_here_change_in_production}
+      WAQI_API_KEY: ${WAQI_API_KEY:-4d088aed7349967ad5cf5a2d8f54662a48957105}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-your_twilio_sid_here}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-your_twilio_auth_token_here}
+      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER:-your_twilio_phone_number}
+      BLOCKCHAIN_RPC_URL: ${BLOCKCHAIN_RPC_URL:-http://ganache:8545}
+      PYTHON_ML_SERVICE_URL: http://ml-service:8001/analyze-image
     volumes:
       - uploads_data:/app/uploads
       - models_data:/app/models
     depends_on:
       postgres:
         condition: service_healthy
+      ganache:
+        condition: service_started
+      ml-service:
+        condition: service_healthy
     networks:
       - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:5000/api/status', (r) => process.exit(r.statusCode === 200 ? 0 : 1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
 
-  # Frontend with Nginx
+  # Local Ethereum JSON-RPC node (Ganache) for blockchain emulation
+  ganache:
+    image: trufflesuite/ganache-cli:latest
+    container_name: cg-suraksha-ganache
+    command: --host 0.0.0.0 --port 8545 --networkId 1337 --chainId 1337
+    # Install wget for healthcheck
+    entrypoint: >
+      /bin/sh -c "
+        apk add --no-cache wget &&
+        node /app/ganache-core.docker.cli.js --host 0.0.0.0 --port 8545 --networkId 1337 --chainId 1337
+      "
+    ports:
+      - "8545:8545"
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "8545"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # Python ML microservice
+  ml-service:
+    build:
+      context: ./python-ml-service
+      dockerfile: Dockerfile
+    container_name: cg-suraksha-ml
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8001:8001"
+    volumes:
+      - models_data:/app/models
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    # Frontend with Nginx
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        NODE_ENV: production
     container_name: cg-suraksha-frontend
+    restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
+      - "127.0.0.1:3000:80"  # Only allow local access, use reverse proxy in production
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy  # Wait for backend to be ready
     networks:
       - app-network
     environment:
-      - VITE_API_URL=http://localhost/api
+      - NODE_ENV=production
+      - VITE_API_URL=/api  # Use relative URL for API requests
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
 
 volumes:
   postgres_data:
@@ -70,3 +144,5 @@ volumes:
 networks:
   app-network:
     driver: bridge
+
+  

@@ -2,10 +2,23 @@ import jwt from 'jsonwebtoken';
 import twilio from 'twilio';
 import { query } from '../config/database.js';
 
-const twilioClient = twilio(
-  process.env.TWILIO_ACCOUNT_SID,
-  process.env.TWILIO_AUTH_TOKEN
-);
+// Initialize Twilio client safely. In environments where Twilio credentials
+// are not provided (e.g., local dev without SMS), we should not throw and
+// instead disable SMS send functionality. Twilio requires an accountSid
+// that starts with "AC"; guard against invalid/missing values.
+let twilioClient = null;
+try {
+  const sid = process.env.TWILIO_ACCOUNT_SID;
+  const token = process.env.TWILIO_AUTH_TOKEN;
+  if (sid && sid.startsWith('AC') && token) {
+    twilioClient = twilio(sid, token);
+  } else {
+    console.warn('Twilio credentials missing or invalid; SMS functionality disabled');
+  }
+} catch (e) {
+  console.warn('Failed to initialize Twilio client:', e && e.message ? e.message : e);
+  twilioClient = null;
+}
 
 // Generate a random 6-digit OTP
 const generateOTP = () => {
@@ -35,17 +48,44 @@ export const sendOtp = async (req, res, next) => {
     console.log('\n==================================');
     console.log(`🔐 OTP for ${phoneNumber}: ${otp}`);
     console.log('==================================\n');
+    // If Twilio client is initialized and enabled, attempt to send SMS.
+    // Use explicit ENABLE_TWILIO=true to opt-in to sending in non-production environments.
+    const normalizePhone = (p) => {
+      if (!p) return p;
+      const trimmed = String(p).trim();
+      if (trimmed.startsWith('+')) return trimmed;
+      // treat 10-digit numbers as Indian numbers and prefix +91
+      const digits = trimmed.replace(/[^0-9]/g, '');
+      if (digits.length === 10) return `+91${digits}`;
+      if (digits.length === 11 && digits.startsWith('0')) return `+91${digits.slice(1)}`;
+      // fallback: return with a plus if it looks like international without plus
+      if (digits.length > 10) return `+${digits}`;
+      return trimmed;
+    };
 
-    // In production, uncomment this to send actual SMS
-    /*
-    await twilioClient.messages.create({
-      body: `Your Chhattisgarh Suraksha verification code is: ${otp}`,
-      from: process.env.TWILIO_PHONE_NUMBER,
-      to: phoneNumber
-    });
-    */
+    let smsSent = false;
+    if (twilioClient && process.env.TWILIO_PHONE_NUMBER && (process.env.ENABLE_TWILIO === 'true' || process.env.NODE_ENV === 'production')) {
+      try {
+        const to = normalizePhone(phoneNumber);
+        const from = normalizePhone(process.env.TWILIO_PHONE_NUMBER);
+        console.log('Attempting Twilio send from', from, 'to', to);
+        const msg = await twilioClient.messages.create({
+          body: `Your Chhattisgarh Suraksha verification code is: ${otp}`,
+          from,
+          to
+        });
+        console.log('Twilio SMS sent:', msg.sid);
+        smsSent = true;
+      } catch (smsErr) {
+        console.warn('Twilio SMS send failed:', smsErr?.message || smsErr);
+        smsSent = false;
+      }
+    } else {
+      console.log('Twilio not enabled or missing credentials; SMS not sent. To enable set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER and ENABLE_TWILIO=true');
+    }
 
-    res.status(200).json({ message: 'OTP sent successfully' });
+    // Return success but indicate whether SMS was dispatched. The OTP is always stored in DB so it can be verified.
+    res.status(200).json({ message: 'OTP generated', smsSent });
   } catch (error) {
     next(error);
   }
@@ -119,7 +159,10 @@ export const registerUser = async (req, res, next) => {
     console.log('📝 Registration Request:', req.body);
     console.log('==================================\n');
 
-    const { phoneNumber, fullName, email, address } = req.body;
+    // Accept optional role and employeeId (for municipality employees)
+    const { phoneNumber, fullName, email, address, role } = req.body;
+    // employeeId may be sent when role === 'municipality'
+    const employeeId = req.body.employeeId || null;
 
     if (!phoneNumber || !fullName) {
       console.log('❌ Validation Error: Missing required fields');
@@ -151,11 +194,25 @@ export const registerUser = async (req, res, next) => {
       });
     }
 
-    // Create new user
+    // Create new user (keep users table schema unchanged)
     const result = await query(
       'INSERT INTO users (phone_number, full_name, email, address) VALUES ($1, $2, $3, $4) RETURNING id',
       [phoneNumber, fullName, email || null, address || null]
     );
+
+    // If this is a municipality employee, create an employees record
+    if (role === 'municipality' && employeeId) {
+      try {
+        await query(
+          'INSERT INTO employees (user_id, employee_id, metadata) VALUES ($1, $2, $3)',
+          [result.rows[0].id, employeeId, JSON.stringify({ created_by: 'self' })]
+        );
+        console.log('✅ Municipality employee record created for user', result.rows[0].id);
+      } catch (e) {
+        console.warn('Failed to create employee record:', e.message || e);
+        // don't fail entire registration on employee table issues; just warn
+      }
+    }
 
     // Generate JWT token
     const token = jwt.sign(

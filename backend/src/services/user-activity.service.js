@@ -1,6 +1,70 @@
 import { query } from '../config/database.js';
 
 class UserActivityService {
+  // Constants for achievement types
+  static ACHIEVEMENT_TYPES = {
+    REPORT_SUBMITTED: 'report_submitted',
+    FORUM_POST: 'forum_post_created',
+    FORUM_REPLY: 'forum_reply_added',
+    DATA_EXPORT: 'data_exported'
+  };
+
+  // Base points configuration
+  static BASE_POINTS = {
+    [UserActivityService.ACHIEVEMENT_TYPES.REPORT_SUBMITTED]: 10,
+    [UserActivityService.ACHIEVEMENT_TYPES.FORUM_POST]: 5,
+    [UserActivityService.ACHIEVEMENT_TYPES.FORUM_REPLY]: 2,
+    [UserActivityService.ACHIEVEMENT_TYPES.DATA_EXPORT]: 1
+  };
+
+  // Additional points for report details
+  static REPORT_BONUS_POINTS = {
+    HAS_PHOTOS: 5,
+    HAS_DESCRIPTION: 3,
+    HAS_KEYWORDS: 2,
+    HAS_ADDITIONAL_DATA: 5,
+    SEVERITY_HIGH: 5,
+    SEVERITY_MEDIUM: 3,
+    SEVERITY_LOW: 1
+  };
+
+  // Calculate report points based on details
+  static calculateReportPoints(reportData) {
+    let points = this.BASE_POINTS[this.ACHIEVEMENT_TYPES.REPORT_SUBMITTED];
+    
+    // Add bonus points for detailed reports
+    if (reportData.photoHash) {
+      points += this.REPORT_BONUS_POINTS.HAS_PHOTOS;
+    }
+    
+    if (reportData.description && reportData.description.length > 50) {
+      points += this.REPORT_BONUS_POINTS.HAS_DESCRIPTION;
+    }
+    
+    if (reportData.keywords) {
+      points += this.REPORT_BONUS_POINTS.HAS_KEYWORDS;
+    }
+    
+    if (reportData.additionalData && Object.keys(reportData.additionalData).length > 0) {
+      points += this.REPORT_BONUS_POINTS.HAS_ADDITIONAL_DATA;
+    }
+    
+    // Add points based on severity
+    switch(reportData.severity?.toLowerCase()) {
+      case 'high':
+        points += this.REPORT_BONUS_POINTS.SEVERITY_HIGH;
+        break;
+      case 'medium':
+        points += this.REPORT_BONUS_POINTS.SEVERITY_MEDIUM;
+        break;
+      case 'low':
+        points += this.REPORT_BONUS_POINTS.SEVERITY_LOW;
+        break;
+    }
+    
+    return points;
+  }
+
   // Create user activity and stats tables if they don't exist
   static async createTables() {
     // User activity table
@@ -28,67 +92,233 @@ class UserActivityService {
       )
     `);
 
-    console.log('✅ User activity tables created/verified');
+    // Position types table
+    await query(`
+      CREATE TABLE IF NOT EXISTS position_types (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(50) NOT NULL,
+        icon VARCHAR(50) NOT NULL,
+        required_points INTEGER NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // User positions table
+    await query(`
+      CREATE TABLE IF NOT EXISTS user_positions (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        position_id INTEGER NOT NULL,
+        current_points INTEGER DEFAULT 0,
+        level INTEGER DEFAULT 1,
+        progress_to_next_level INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id),
+        FOREIGN KEY (position_id) REFERENCES position_types(id)
+      )
+    `);
+
+    // User activity points table
+    await query(`
+      CREATE TABLE IF NOT EXISTS user_activity_points (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        activity_type VARCHAR(50) NOT NULL,
+        points INTEGER NOT NULL,
+        reference_id INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      )
+    `);
+
+    // Achievements table
+    await query(`
+      CREATE TABLE IF NOT EXISTS achievements (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        description TEXT NOT NULL,
+        icon VARCHAR(50) NOT NULL,
+        type VARCHAR(50) NOT NULL,
+        required_count INTEGER NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // User achievements table
+    await query(`
+      CREATE TABLE IF NOT EXISTS user_achievements (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        achievement_id INTEGER NOT NULL,
+        progress INTEGER DEFAULT 0,
+        achieved_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id),
+        FOREIGN KEY (achievement_id) REFERENCES achievements(id),
+        UNIQUE(user_id, achievement_id)
+      )
+    `);
+
+    console.log('✅ User activity and gamification tables created/verified');
   }
 
   // Track user activity
   static async trackActivity(userId, activityType, metadata = {}) {
     try {
-      // Insert activity record
-      await query(
-        `INSERT INTO user_activity (user_id, activity_type, metadata)
-         VALUES ($1, $2, $3)`,
-        [userId, activityType, JSON.stringify(metadata)]
-      );
+      // Start a database transaction
+      await query('BEGIN');
 
-      // Ensure user_stats record exists
-      await query(
-        `INSERT INTO user_stats (user_id)
-         VALUES ($1)
-         ON CONFLICT (user_id) DO NOTHING`,
-        [userId]
-      );
-
-      // Update appropriate counter based on activity type
-      let updateField = '';
-      switch (activityType) {
-        case 'report_submitted':
-          updateField = 'reports_submitted = reports_submitted + 1';
-          break;
-        case 'forum_post_created':
-          updateField = 'forum_posts = forum_posts + 1';
-          break;
-        case 'forum_reply_added':
-          updateField = 'forum_replies = forum_replies + 1';
-          break;
-        case 'data_exported':
-          updateField = 'data_exports = data_exports + 1';
-          break;
-        default:
-          updateField = '';
-      }
-
-      if (updateField) {
+      try {
+        // Insert activity record
         await query(
-          `UPDATE user_stats
-           SET ${updateField},
-               last_active = CURRENT_TIMESTAMP,
-               updated_at = CURRENT_TIMESTAMP
-           WHERE user_id = $1`,
+          `INSERT INTO user_activity (user_id, activity_type, metadata)
+           VALUES ($1, $2, $3)`,
+          [userId, activityType, JSON.stringify(metadata)]
+        );
+
+        // Ensure user_stats record exists
+        await query(
+          `INSERT INTO user_stats (user_id)
+           VALUES ($1)
+           ON CONFLICT (user_id) DO NOTHING`,
           [userId]
         );
-      } else {
-        // Just update last_active
-        await query(
-          `UPDATE user_stats
-           SET last_active = CURRENT_TIMESTAMP,
-               updated_at = CURRENT_TIMESTAMP
-           WHERE user_id = $1`,
-          [userId]
-        );
-      }
 
-      return { success: true };
+        // Update appropriate counter and award points based on activity type
+        let updateField = '';
+        let pointsToAward = 0;
+        switch (activityType) {
+          case 'report_submitted':
+            updateField = 'reports_submitted = reports_submitted + 1';
+            pointsToAward = this.calculateReportPoints(metadata);
+            break;
+          case 'forum_post_created':
+            updateField = 'forum_posts = forum_posts + 1';
+            pointsToAward = this.BASE_POINTS[UserActivityService.ACHIEVEMENT_TYPES.FORUM_POST];
+            break;
+          case 'forum_reply_added':
+            updateField = 'forum_replies = forum_replies + 1';
+            pointsToAward = this.BASE_POINTS[UserActivityService.ACHIEVEMENT_TYPES.FORUM_REPLY];
+            break;
+          case 'data_exported':
+            updateField = 'data_exports = data_exports + 1';
+            pointsToAward = this.BASE_POINTS[UserActivityService.ACHIEVEMENT_TYPES.DATA_EXPORT];
+            break;
+        }
+
+        if (updateField) {
+          await query(
+            `UPDATE user_stats
+             SET ${updateField},
+                 last_active = CURRENT_TIMESTAMP,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE user_id = $1`,
+            [userId]
+          );
+        }
+
+        if (pointsToAward > 0) {
+          // Award points
+          // Ensure referenceId is an integer (or null) to avoid type conflicts
+          const refId = metadata && metadata.referenceId != null ? parseInt(metadata.referenceId) : null;
+          await query(
+            `INSERT INTO user_activity_points (user_id, activity_type, points, reference_id)
+             VALUES ($1, $2, $3, $4)`,
+            [userId, activityType, pointsToAward, Number.isNaN(refId) ? null : refId]
+          );
+
+          // Update user position based on total points
+          const totalPoints = await query(
+            `SELECT SUM(points) as total_points
+             FROM user_activity_points
+             WHERE user_id = $1`,
+            [userId]
+          );
+
+          // Get next position based on total points
+          const nextPosition = await query(
+            `SELECT id, name, icon 
+             FROM position_types
+             WHERE required_points <= $1
+             ORDER BY required_points DESC
+             LIMIT 1`,
+            [totalPoints.rows[0].total_points || 0]
+          );
+
+          // Update or create user position
+          if (nextPosition.rows.length > 0) {
+            const tp = Number(totalPoints.rows[0].total_points || 0);
+            await query(
+              `INSERT INTO user_positions 
+                (user_id, position_id, current_points, level, progress_to_next_level)
+               VALUES (
+                 $1::int, 
+                 $2::int,
+                 $3::int,
+                 FLOOR(SQRT($3::float / 100)) + 1,
+                 $3 - (POWER(FLOOR(SQRT($3::float / 100)), 2) * 100)
+               )
+               ON CONFLICT (user_id) DO UPDATE
+               SET position_id = $2,
+                   current_points = $3,
+                   level = FLOOR(SQRT($3::float / 100)) + 1,
+                   progress_to_next_level = $3 - (POWER(FLOOR(SQRT($3::float / 100)), 2) * 100),
+                   updated_at = CURRENT_TIMESTAMP`,
+              [userId, nextPosition.rows[0].id, tp]
+            );
+          }
+
+          // Check and update achievements
+          const userStats = await query(
+            `SELECT * FROM user_stats WHERE user_id = $1`,
+            [userId]
+          );
+
+          if (userStats.rows.length > 0) {
+            const stats = userStats.rows[0];
+            const achievements = await query(
+              `SELECT * FROM achievements WHERE type = $1`,
+              [activityType]
+            );
+
+            for (const achievement of achievements.rows) {
+              let progress = 0;
+              switch (achievement.type) {
+                case 'report_submitted':
+                  progress = stats.reports_submitted;
+                  break;
+                case 'forum_post_created':
+                  progress = stats.forum_posts;
+                  break;
+                case 'forum_reply_added':
+                  progress = stats.forum_replies;
+                  break;
+              }
+
+              await query(
+                `INSERT INTO user_achievements (user_id, achievement_id, progress)
+                 VALUES ($1, $2, $3)
+                 ON CONFLICT (user_id, achievement_id)
+                 DO UPDATE SET 
+                   progress = $3,
+                   achieved_at = CASE 
+                     WHEN user_achievements.progress < $4 AND $3 >= $4 THEN CURRENT_TIMESTAMP
+                     ELSE user_achievements.achieved_at
+                   END`,
+                [userId, achievement.id, progress, achievement.required_count]
+              );
+            }
+          }
+        }
+
+        await query('COMMIT');
+        return { success: true };
+      } catch (err) {
+        await query('ROLLBACK');
+        throw err;
+      }
     } catch (error) {
       console.error('Error tracking activity:', error);
       throw error;
@@ -245,5 +475,4 @@ class UserActivityService {
     }
   }
 }
-
 export default UserActivityService;

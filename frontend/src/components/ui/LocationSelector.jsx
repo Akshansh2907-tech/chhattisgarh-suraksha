@@ -2,8 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import Icon from '../AppIcon';
 import Button from './Button';
 
+import { useLocation } from '../../contexts/LocationContext';
+
 const LocationSelector = () => {
-  const [currentLocation, setCurrentLocation] = useState('Downtown District');
+  const { currentLocation, setCurrentLocation } = useLocation();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isDetectingLocation, setIsDetectingLocation] = useState(false);
@@ -38,10 +40,10 @@ const LocationSelector = () => {
   }, []);
 
   const handleLocationSelect = (location) => {
-    setCurrentLocation(location?.name);
+    // store the full location object in context
+    setCurrentLocation(location);
     setIsDropdownOpen(false);
     setSearchQuery('');
-    // In real app, this would update global location context
     window.dispatchEvent(new CustomEvent('cs:location-changed', { detail: location }));
   };
 
@@ -87,7 +89,8 @@ const LocationSelector = () => {
         coordinates: [latitude, longitude]
       };
       
-      setCurrentLocation(detectedLocation.name);
+      // store full object
+      setCurrentLocation(detectedLocation);
       setIsDropdownOpen(false);
       window.dispatchEvent(new CustomEvent('cs:location-changed', { detail: detectedLocation }));
     } catch (error) {
@@ -125,7 +128,7 @@ const LocationSelector = () => {
         className="flex items-center space-x-2 min-w-0 max-w-48"
       >
         <Icon name="MapPin" size={16} className="text-primary flex-shrink-0" />
-        <span className="truncate text-sm font-medium">{currentLocation}</span>
+        <span className="truncate text-sm font-medium">{currentLocation?.name || 'Select location'}</span>
         <Icon 
           name="ChevronDown" 
           size={16} 
@@ -182,7 +185,7 @@ const LocationSelector = () => {
                     key={location?.id}
                     onClick={() => handleLocationSelect(location)}
                     className={`w-full flex items-center space-x-3 px-3 py-2 text-sm text-left hover:bg-muted rounded-md transition-colors duration-200 ${
-                      currentLocation === location?.name ? 'bg-muted' : ''
+                      currentLocation?.id === location?.id ? 'bg-muted' : ''
                     }`}
                   >
                     <div className="flex items-center justify-center w-8 h-8 bg-muted rounded-full">
@@ -194,7 +197,7 @@ const LocationSelector = () => {
                         {location?.type} • {location?.coordinates?.[0]?.toFixed(4)}, {location?.coordinates?.[1]?.toFixed(4)}
                       </div>
                     </div>
-                    {currentLocation === location?.name && (
+                    {currentLocation?.id === location?.id && (
                       <Icon name="Check" size={16} className="text-primary" />
                     )}
                   </button>

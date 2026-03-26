@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { authAPI, auth } from '../../utils/api';
+import { useAuth } from '../../contexts/AuthContext';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import Icon from '../../components/AppIcon';
@@ -10,15 +11,19 @@ const Login = () => {
   
   // Check if user is already logged in
   React.useEffect(() => {
-    if (auth.isLoggedIn()) {
-      authAPI.verifyToken()
-        .then(() => {
-          navigate('/environmental-dashboard', { replace: true });
-        })
-        .catch(() => {
-          // Token will be automatically cleared if invalid
-        });
-    }
+    let mounted = true;
+    const check = async () => {
+      if (auth.isLoggedIn()) {
+        try {
+          await authAPI.verifyToken();
+          if (mounted) navigate('/environmental-dashboard', { replace: true });
+        } catch (err) {
+          // Token invalid — cleared by API layer
+        }
+      }
+    };
+    check();
+    return () => { mounted = false; };
   }, [navigate]);
 
   const [step, setStep] = useState(1); // 1: Phone input, 2: OTP verification
@@ -26,6 +31,7 @@ const Login = () => {
   const [otp, setOtp] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const { refreshProfile } = useAuth();
 
   const handlePhoneSubmit = async (e) => {
     console.log('Form submitted!'); // Basic check
@@ -63,23 +69,40 @@ const Login = () => {
       // Verify OTP and get user data
       const data = await authAPI.verifyOTP(phoneNumber, otp);
       
-      // Store user ID if available
-      if (data.userId) {
-        localStorage.setItem('user_id', data.userId);
+      // Use API auth manager to set token and headers
+      if (data.token) {
+        auth.setToken(data.token);
+        if (data.userId) {
+          localStorage.setItem('user_id', data.userId);
+        }
+
+        // Refresh profile in AuthContext so the app knows user is logged in
+        if (typeof refreshProfile === 'function') {
+          await refreshProfile();
+        }
       }
 
-      // Redirect based on user status
-      if (data.isNewUser || !data.isProfileComplete) {
-        window.location.replace('/signup');
+      // Only new users should be redirected to signup
+      if (data.isNewUser) {
+        // Pass the phone number to the signup page to continue registration
+        navigate('/signup', { 
+          replace: true,
+          state: { 
+            phoneNumber,
+            isNewUser: true
+          }
+        });
       } else {
-        window.location.replace('/environmental-dashboard');
+        // Existing users go to dashboard, even if profile is incomplete
+        // They can complete their profile later from the user profile page
+        navigate('/environmental-dashboard', { replace: true });
       }
     } catch (err) {
       console.error('Failed to verify OTP:', err);
       
-      // Clear any invalid auth data
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('user_id');
+  // Clear any invalid auth data via token manager
+  auth.clearToken();
+  localStorage.removeItem('user_id');
       
       // Handle specific error cases
       if (err.message.includes('expired')) {

@@ -1,16 +1,18 @@
 import React from 'react';
 import { Navigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
 
 const PublicRoute = ({ children }) => {
-  // Check if user is authenticated
-  const isAuthenticated = localStorage.getItem('auth_token');
+  const { user, loading } = useAuth();
 
-  // If not authenticated, redirect to login
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+  if (loading) return null;
+
+  // If user is authenticated, redirect them to the dashboard
+  if (user) {
+    return <Navigate to="/environmental-dashboard" replace />;
   }
 
-  // If authenticated, render the children (which in this case is usually another Navigate component)
+  // Otherwise render public children (login/signup pages)
   return children;
 };
 

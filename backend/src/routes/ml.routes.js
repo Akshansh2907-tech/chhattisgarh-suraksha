@@ -7,7 +7,7 @@ import {
   trainModels,
   getModelInfo
 } from '../controllers/ml.controller.js';
-import { authenticateToken as authenticate } from '../middleware/auth.middleware.js';
+import { authMiddleware } from '../middleware/auth.middleware.js';
 
 const router = express.Router();
 
@@ -25,7 +25,7 @@ router.get('/patterns', getPatterns);
 
 // Trigger model training (admin only - requires auth)
 // TODO: Add admin-specific middleware
-router.post('/train', authenticate, trainModels);
+router.post('/train', authMiddleware, trainModels);
 
 // Get model information (public)
 router.get('/models/info', getModelInfo);

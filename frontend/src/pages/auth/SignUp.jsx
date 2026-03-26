@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
-import { authAPI } from '../../utils/api';
+import { authAPI, auth } from '../../utils/api';
+import { useAuth } from '../../contexts/AuthContext';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import Icon from '../../components/AppIcon';
@@ -18,10 +19,13 @@ const SignUp = () => {
     otp: '',
     fullName: '',
     email: '',
-    address: ''
+    address: '',
+    role: 'citizen', // 'citizen' or 'municipality'
+    employeeId: ''
   });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const { refreshProfile } = useAuth();
 
   const handlePhoneSubmit = async (e) => {
     e.preventDefault();
@@ -46,20 +50,37 @@ const SignUp = () => {
     setIsLoading(true);
 
     try {
-      const response = await authAPI.verifyOTP(formData.phoneNumber, formData.otp);
-      console.log('OTP verification response:', response.data);
+      const data = await authAPI.verifyOTP(formData.phoneNumber, formData.otp);
+      console.log('OTP verification response:', data);
       
-      if (response.data.isNewUser) {
+      // Use the API token manager to set token and headers
+      if (data.token) {
+        auth.setToken(data.token);
+        if (data.userId) {
+          localStorage.setItem('user_id', data.userId);
+        }
+
+        // Refresh profile in context so UI knows user is logged in
+        if (typeof refreshProfile === 'function') {
+          await refreshProfile();
+        }
+      }
+
+      if (data.isNewUser || !data.isProfileComplete) {
+        // Proceed to profile completion
         setStep(3);
       } else {
-        // If user already exists, redirect to login
-        navigate('/login', {
-          state: { message: 'Account already exists. Please login.' }
-        });
+        // User exists and profile is complete, redirect to dashboard
+        navigate('/environmental-dashboard', { replace: true });
       }
     } catch (err) {
       console.error('Failed to verify OTP:', err);
-      setError(err.response?.data?.message || 'Invalid OTP. Please try again.');
+      if (err.message.includes('expired')) {
+        setError('OTP has expired. Please request a new one.');
+        setStep(1); // Go back to phone number input
+      } else {
+        setError(err.response?.data?.message || 'Invalid OTP. Please try again.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -71,14 +92,26 @@ const SignUp = () => {
     setIsLoading(true);
 
     try {
-      const response = await authAPI.register(formData);
-      console.log('Registration successful:', response.data);
+      const data = await authAPI.register(formData);
+      console.log('Registration successful:', data);
       
-      // Save auth token
-      localStorage.setItem('auth_token', response.data.token);
-      
-      // Redirect to environmental dashboard
-      navigate('/environmental-dashboard', { replace: true });
+      if (data.token) {
+        // Use API token manager to set token and headers
+        auth.setToken(data.token);
+        if (data.userId) {
+          localStorage.setItem('user_id', data.userId);
+        }
+
+        // Refresh profile in context so UI knows user is logged in
+        if (typeof refreshProfile === 'function') {
+          await refreshProfile();
+        }
+
+        // Redirect to environmental dashboard
+        navigate('/environmental-dashboard', { replace: true });
+      } else {
+        throw new Error('No authentication token received after registration');
+      }
     } catch (err) {
       console.error('Failed to register:', err);
       setError(err.response?.data?.message || 'Failed to create account. Please try again.');
@@ -253,6 +286,35 @@ const SignUp = () => {
         {/* User Details Step */}
         {step === 3 && (
           <form onSubmit={handleDetailsSubmit} className="space-y-6">
+            {/* Role selector: Citizen or Municipality Employee */}
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-2">Account Type</label>
+              <div className="flex items-center space-x-4">
+                <label className={`inline-flex items-center space-x-2 cursor-pointer` }>
+                  <input
+                    type="radio"
+                    name="role"
+                    value="citizen"
+                    checked={formData.role === 'citizen'}
+                    onChange={handleChange}
+                    className="form-radio"
+                  />
+                  <span>Citizen</span>
+                </label>
+
+                <label className={`inline-flex items-center space-x-2 cursor-pointer` }>
+                  <input
+                    type="radio"
+                    name="role"
+                    value="municipality"
+                    checked={formData.role === 'municipality'}
+                    onChange={handleChange}
+                    className="form-radio"
+                  />
+                  <span>Municipality Employee</span>
+                </label>
+              </div>
+            </div>
             <div>
               <label htmlFor="fullName" className="block text-sm font-medium text-foreground mb-2">
                 Full Name
@@ -301,10 +363,30 @@ const SignUp = () => {
               />
             </div>
 
+            {/* Employee ID shown only for municipality employees */}
+            {formData.role === 'municipality' && (
+              <div>
+                <label htmlFor="employeeId" className="block text-sm font-medium text-foreground mb-2">
+                  Employee ID
+                </label>
+                <Input
+                  id="employeeId"
+                  name="employeeId"
+                  type="text"
+                  placeholder="Enter your municipal employee ID"
+                  value={formData.employeeId}
+                  onChange={handleChange}
+                  required={formData.role === 'municipality'}
+                  className="w-full"
+                />
+                <p className="mt-2 text-sm text-muted-foreground">Only required for Municipality Employees.</p>
+              </div>
+            )}
+
             <Button
               type="submit"
               className="w-full"
-              disabled={!formData.fullName || !formData.email || !formData.address || isLoading}
+              disabled={!formData.fullName || !formData.email || !formData.address || (formData.role === 'municipality' && !formData.employeeId) || isLoading}
             >
               {isLoading ? (
                 <Icon name="Loader2" className="mr-2 animate-spin" />

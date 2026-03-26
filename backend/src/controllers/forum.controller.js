@@ -1,4 +1,5 @@
 import ForumService from '../services/forum.service.js';
+import { query } from '../config/database.js';
 
 export const getAllTopics = async (req, res, next) => {
   try {
@@ -17,7 +18,10 @@ export const getAllTopics = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      data: result
+      data: {
+        topics: result.topics,
+        total: result.total
+      }
     });
   } catch (error) {
     console.error('❌ Error getting topics:', error);
@@ -69,12 +73,15 @@ export const createTopic = async (req, res, next) => {
     });
   } catch (error) {
     console.error('❌ Error creating topic:', error);
-    if (error.message.includes('must be between')) {
+    // If service threw a structured ValidationError, return the errors payload directly
+    if (error && (error.name === 'ValidationError' || Array.isArray(error.errors))) {
       return res.status(400).json({
         success: false,
-        message: error.message
+        message: 'Validation Error',
+        errors: error.errors || []
       });
     }
+
     next(error);
   }
 };
@@ -182,6 +189,83 @@ export const getReplies = async (req, res, next) => {
     });
   } catch (error) {
     console.error('❌ Error getting replies:', error);
+    next(error);
+  }
+};
+
+export const getForumStats = async (req, res, next) => {
+  try {
+    console.log('📊 GET /api/forum/stats');
+
+    const stats = await ForumService.getForumStats();
+
+    res.status(200).json({
+      success: true,
+      data: stats
+    });
+  } catch (error) {
+    console.error('❌ Error getting forum stats:', error);
+    next(error);
+  }
+};
+
+export const getTopContributors = async (req, res, next) => {
+  try {
+    const limit = parseInt(req.query.limit) || 10;
+
+    console.log(`🏆 GET /api/forum/contributors - Limit: ${limit}`);
+
+    const contributors = await ForumService.getTopContributors(limit);
+
+    res.status(200).json({
+      success: true,
+      data: contributors
+    });
+  } catch (error) {
+    console.error('❌ Error getting top contributors:', error);
+    next(error);
+  }
+};
+
+export const updateUserOnlineStatus = async (req, res, next) => {
+  try {
+    const userId = req.user?.id;
+    const username = req.user?.username;
+
+    let resolvedUserId = userId;
+    let resolvedUsername = username;
+
+    // If the token didn't include user id/username, try to resolve from phone number in token payload
+    if ((!resolvedUserId || !resolvedUsername) && req.user?.raw?.phoneNumber) {
+      try {
+        const userRes = await query('SELECT id, full_name, phone_number FROM users WHERE phone_number = $1 LIMIT 1', [req.user.raw.phoneNumber]);
+        if (userRes.rows.length > 0) {
+          const u = userRes.rows[0];
+          resolvedUserId = resolvedUserId || u.id;
+          resolvedUsername = resolvedUsername || u.full_name || u.phone_number;
+        }
+      } catch (e) {
+        console.warn('Could not resolve user from token phone number:', e && e.message ? e.message : e);
+      }
+    }
+
+    if (!resolvedUserId || !resolvedUsername) {
+      return res.status(400).json({
+        success: false,
+        message: 'User ID and username are required'
+      });
+    }
+
+    console.log(`👤 POST /api/forum/online - User: ${resolvedUserId} (${resolvedUsername})`);
+
+    await ForumService.updateUserOnlineStatus(resolvedUserId, resolvedUsername);
+
+    res.status(200).json({
+      success: true,
+      message: 'Online status updated'
+    });
+  } catch (error) {
+    console.error('❌ Error updating online status:', error);
     next(error);
   }
 };

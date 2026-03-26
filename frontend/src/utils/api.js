@@ -1,24 +1,25 @@
 import axios from 'axios';
+import { normalizePhone } from './phone';
 
 // Create axios instance with base URL
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000',
+  baseURL: '/api',  // Always use relative path, nginx will handle routing
   headers: {
     'Content-Type': 'application/json',
   },
   timeout: 30000, // 30 second timeout
+  withCredentials: true // Important for CORS with credentials
 });
 
 // Constants for auth-related functionality
 const AUTH_TOKEN_KEY = 'auth_token';
 const USER_ID_KEY = 'user_id';
 
-// List of endpoints that should not trigger auth redirect
+// List of endpoints that should not trigger auth handling logic
 const AUTH_ENDPOINTS = [
-  '/api/auth/send-otp',
-  '/api/auth/verify-otp',
-  '/api/auth/verify',
-  '/api/auth/register'
+  '/auth/send-otp',
+  '/auth/verify-otp',
+  '/auth/register'
 ];
 
 // Simple token management functions
@@ -48,23 +49,10 @@ const tokenManager = {
 // Initialize auth token from localStorage
 const storedToken = localStorage.getItem('auth_token');
 if (storedToken) {
-  setupAuthToken(storedToken);
+  tokenManager.setToken(storedToken);
 }
 
-// Add request interceptor to include auth token and handle errors
-api.interceptors.request.use(
-  (config) => {
-    console.log('Request to:', config.url);
-    // Token will already be in headers from setupAuthToken
-    return config;
-  },
-  (error) => {
-    console.error('Request Interceptor Error:', error);
-    return Promise.reject(error);
-  }
-);
-
-// Add request interceptor
+// Add request interceptor to add auth token to requests
 api.interceptors.request.use(
   (config) => {
     // Add auth token to requests if available
@@ -74,57 +62,10 @@ api.interceptors.request.use(
     }
     return config;
   },
-  (error) => {
-    return Promise.reject(error);
-  }
+  (error) => Promise.reject(error)
 );
 
-// Add response interceptor
-api.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    // Handle network errors
-    if (!error.response) {
-      return Promise.reject({
-        message: error.message || 'Network error occurred'
-      });
-    }
-
-    // Handle authentication errors
-    const isAuthEndpoint = AUTH_ENDPOINTS.some(endpoint => 
-      error.config?.url?.includes(endpoint)
-    );
-    
-    if (isAuthError) {
-      console.log('[Auth Status]:', {
-        isAuthEndpoint,
-        token: localStorage.getItem('auth_token'),
-        currentPath: window.location.pathname
-      });
-    }
-    
-    // Only handle auth errors for non-auth endpoints
-    if (isAuthError && !isAuthEndpoint) {
-      console.log('[Auth Error]: Handling unauthorized access');
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('user_id');
-      delete api.defaults.headers.common['Authorization'];
-      
-      // Only redirect if we're not already on the login page and it's a frontend route
-      if (!window.location.pathname.includes('/login')) {
-        console.log('[Auth Redirect]: Redirecting to login page');
-        window.location.replace('/login');
-      }
-    }
-    
-    return Promise.reject({
-      ...error,
-      message: error.response?.data?.message || error.message || 'An unexpected error occurred'
-    });
-  }
-);
-
-// Add a single response interceptor to handle all types of errors
+// Response interceptor: central logging, network handling and auth handling
 api.interceptors.response.use(
   (response) => {
     console.log('[API Response]:', {
@@ -168,21 +109,15 @@ api.interceptors.response.use(
       console.log('[Auth Status]:', {
         isAuthEndpoint,
         url: error.config?.url,
-        token: localStorage.getItem('auth_token'),
+        token: tokenManager.getToken(),
         currentPath: window.location.pathname
       });
 
-      // Only handle auth errors for non-auth endpoints and non-verify endpoints
-      if (!isAuthEndpoint && !error.config?.url?.includes('/api/auth/verify')) {
+      // Only clear token automatically for non-auth endpoints. Do NOT perform a hard redirect
+      // here; let the app (AuthContext/components) decide navigation to avoid loops.
+      if (!isAuthEndpoint) {
         console.log('[Auth Error]: Handling unauthorized access');
-        await setupAuthToken(null); // This will clear both token and headers
-        
-        // Only redirect if we're not already on the login page or in the auth flow
-        if (!window.location.pathname.includes('/login') && 
-            !window.location.pathname.includes('/signup')) {
-          console.log('[Auth Redirect]: Redirecting to login page');
-          window.location.replace('/login');
-        }
+        tokenManager.clearToken(); // Clear auth state
       }
     }
 
@@ -194,12 +129,16 @@ api.interceptors.response.use(
   }
 );
 
+// (Note) Only one response interceptor is registered above. Duplicate handlers were removed to
+// avoid multiple token clears or duplicate side effects.
+
 // Auth related API calls
 export const authAPI = {
   // Send OTP
   sendOTP: async (phoneNumber) => {
     try {
-      const response = await api.post('/api/auth/send-otp', { phoneNumber });
+      const normalized = normalizePhone(phoneNumber);
+      const response = await api.post('/auth/send-otp', { phoneNumber: normalized });
       return response.data;
     } catch (error) {
       throw new Error(error.response?.data?.message || 'Failed to send OTP');
@@ -212,11 +151,14 @@ export const authAPI = {
       // Clear any existing auth state
       tokenManager.clearToken();
       
-      const response = await api.post('/api/auth/verify-otp', { 
-        phoneNumber, 
-        otp,
-        timestamp: Date.now()
-      });
+      const normalized = normalizePhone(phoneNumber);
+      const response = await api.post('/auth/verify-otp', { 
+          phoneNumber: normalized, 
+          otp,
+          timestamp: Date.now()
+        });
+
+      console.log('OTP Verification Response:', response.data);
 
       if (!response.data?.token) {
         throw new Error('No authentication token received');
@@ -225,9 +167,16 @@ export const authAPI = {
       // Set the new token
       tokenManager.setToken(response.data.token);
 
-      return response.data;
+      // Return the full response data for the caller to handle
+      return {
+        ...response.data,
+        isNewUser: !!response.data.isNewUser,
+        isProfileComplete: !!response.data.isProfileComplete
+      };
     } catch (error) {
-      if (error.response?.status === 401) {
+      console.error('OTP Verification Error:', error);
+      if (error.response?.status === 401 || 
+          (error.response?.data?.message || '').toLowerCase().includes('expired')) {
         throw new Error('Invalid OTP or OTP has expired');
       }
       throw new Error(error.response?.data?.message || 'Failed to verify OTP');
@@ -242,22 +191,38 @@ export const authAPI = {
         throw new Error('No auth token found');
       }
 
-      const response = await api.get('/api/auth/verify');
+      // The backend does not expose /auth/verify in current API surface.
+      // Use the protected `/users/profile` endpoint to validate the token instead.
+      const response = await api.get('/users/profile');
+      // If this succeeds (200), the token is valid and we return the profile data.
       return response.data;
     } catch (error) {
-      tokenManager.clearToken();
-      throw new Error('Token verification failed');
+      // Only clear token automatically on explicit auth errors (401/403).
+      const status = error.response?.status;
+      if (status === 401 || status === 403) {
+        tokenManager.clearToken();
+        throw new Error('Token verification failed');
+      }
+
+      // For other errors (404, network issues), do not clear token here.
+      // Let the caller decide how to handle these cases.
+      throw error;
     }
   },
 
 //Register user
   register: async (userData) => {
-    return api.post('/api/auth/register', userData);
+    try {
+      const response = await api.post('/auth/register', userData);
+      return response.data;
+    } catch (error) {
+      throw new Error(error.response?.data?.message || 'Failed to register');
+    }
   },
 
   // Check user status
   checkUserStatus: async (phoneNumber) => {
-    return api.get(`/api/status/check/${phoneNumber}`);
+    return api.get(`/status/check/${phoneNumber}`);
   }
 };
 
@@ -265,12 +230,55 @@ export const authAPI = {
 export const userAPI = {
   // Get user profile
   getProfile: async () => {
-    return api.get('/api/users/profile');
+    try {
+      const response = await api.get('/users/profile');
+      return response.data;
+    } catch (error) {
+      throw new Error(error.response?.data?.message || 'Failed to fetch profile');
+    }
+  },
+
+  // Get user stats (reports, forum counts, impact score, achievements)
+  getStats: async (userId) => {
+    try {
+      const response = await api.get(`/users/${userId}/stats`);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to fetch user stats:', error);
+      throw new Error(error.response?.data?.message || 'Failed to fetch user stats');
+    }
+  },
+
+  // Get recent user activity
+  getActivity: async (userId, limit = 20) => {
+    try {
+      const response = await api.get(`/users/${userId}/activity?limit=${limit}`);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to fetch user activity:', error);
+      throw new Error(error.response?.data?.message || 'Failed to fetch user activity');
+    }
   },
 
   // Update user profile
   updateProfile: async (userData) => {
-    return api.put('/api/users/profile', userData);
+    try {
+      const response = await api.put('/users/profile', userData);
+      return response.data;
+    } catch (error) {
+      throw new Error(error.response?.data?.message || 'Failed to update profile');
+    }
+  },
+
+  // Get community-level aggregated stats
+  getCommunityStats: async () => {
+    try {
+      const response = await api.get('/community/stats');
+      return response.data;
+    } catch (error) {
+      console.error('Failed to fetch community stats:', error);
+      throw new Error(error.response?.data?.message || 'Failed to fetch community stats');
+    }
   }
 };
 
@@ -285,51 +293,53 @@ export const metricsAPI = {
   // Get current environmental metrics
   getCurrentMetrics: async () => {
     try {
-      const response = await api.get('/api/metrics/current');
+      const response = await api.get('/metrics/current');
       if (!response?.data) {
         throw new Error('Invalid response format from metrics endpoint');
       }
-      return response;
+      return response.data;
     } catch (error) {
       console.error('Failed to fetch metrics:', error);
-      // Return a formatted error that won't crash the UI
-      throw {
-        message: error?.response?.data?.message || error.message || 'Failed to fetch environmental metrics',
-        status: error?.response?.status || 500,
-        originalError: error
-      };
+      throw new Error(error.response?.data?.message || 'Failed to fetch environmental metrics');
     }
   },
 
   // Get active alerts
   getActiveAlerts: async () => {
     try {
-      const response = await api.get('/api/metrics/alerts');
+      const response = await api.get('/metrics/alerts');
       if (!response?.data) {
         throw new Error('Invalid response format from alerts endpoint');
       }
-      return response;
+      return response.data;
     } catch (error) {
       console.error('Failed to fetch alerts:', error);
-      // Return empty alerts array on error to prevent UI crashes
-      return { 
-        data: { 
-          success: true, 
-          data: [], 
-          message: error?.response?.data?.message || error.message 
-        } 
+      return {
+        success: true,
+        data: [],
+        message: error.response?.data?.message || error.message
       };
     }
   },
 
   // Get historical metrics
   getMetricsHistory: async (type, duration) => {
-    return api.get(`/api/metrics/history?type=${type}&duration=${duration}`);
+    try {
+      const response = await api.get(`/metrics/history?type=${type}&duration=${duration}`);
+      return response.data;
+    } catch (error) {
+      throw new Error(error.response?.data?.message || 'Failed to fetch metrics history');
+    }
   },
 
   // Force update metrics (admin only)
   forceUpdate: async () => {
-    return api.post('/api/metrics/update');
+    try {
+      const response = await api.post('/metrics/update');
+      return response.data;
+    } catch (error) {
+      throw new Error(error.response?.data?.message || 'Failed to force update metrics');
+    }
   }
 };
 

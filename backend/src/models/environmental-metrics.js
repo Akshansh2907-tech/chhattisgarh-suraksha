@@ -165,6 +165,24 @@ class EnvironmentalMetrics {
     
     return result.rows;
   }
+
+  static async getHistoricalMetrics(locationId = 1, days = 30) {
+    const result = await query(
+      `SELECT 
+        aq.*, wm.*,
+        TO_CHAR(aq.timestamp, 'YYYY-MM-DD HH24:MI:SS') as timestamp
+      FROM air_quality_metrics aq
+      JOIN weather_metrics wm ON 
+        wm.location_id = aq.location_id AND 
+        DATE_TRUNC('hour', wm.timestamp) = DATE_TRUNC('hour', aq.timestamp)
+      WHERE aq.location_id = $1
+      AND aq.timestamp > NOW() - ($2 || ' days')::interval
+      ORDER BY aq.timestamp ASC`,
+      [locationId, days]
+    );
+    
+    return result.rows;
+  }
 }
 
 export default EnvironmentalMetrics;

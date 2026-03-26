@@ -6,10 +6,10 @@ const IssueDescription = ({ description, onDescriptionChange, severity, onSeveri
   const [wordCount, setWordCount] = useState(description?.length || 0);
 
   const severityOptions = [
-    { value: 'low', label: 'Low Impact', description: 'Minor issue, not urgent' },
-    { value: 'moderate', label: 'Moderate Impact', description: 'Noticeable issue, should be addressed' },
-    { value: 'high', label: 'High Impact', description: 'Significant issue, needs prompt attention' },
-    { value: 'critical', label: 'Critical Impact', description: 'Severe issue, requires immediate action' }
+    { value: 'low', label: 'Low Security', description: 'Minor issue, routine handling', securityLevel: 'Low priority - Standard response time' },
+    { value: 'moderate', label: 'Moderate Security', description: 'Noticeable issue, prioritized handling', securityLevel: 'Medium priority - Expedited response' },
+    { value: 'high', label: 'High Security', description: 'Significant risk, immediate attention required', securityLevel: 'High priority - Urgent response needed' },
+    { value: 'critical', label: 'Critical Security', description: 'Severe threat, emergency response required', securityLevel: 'Highest priority - Immediate emergency response' }
   ];
 
   const suggestedKeywords = [
@@ -60,14 +60,22 @@ const IssueDescription = ({ description, onDescriptionChange, severity, onSeveri
         />
         
         {severity && (
-          <div className="flex items-center space-x-2 text-sm">
-            <div 
-              className="w-3 h-3 rounded-full"
-              style={{ backgroundColor: getSeverityColor(severity) }}
-            />
-            <span className="text-muted-foreground">
-              {severityOptions?.find(opt => opt?.value === severity)?.description}
-            </span>
+          <div className="space-y-2">
+            <div className="flex items-center space-x-2 text-sm">
+              <div 
+                className="w-3 h-3 rounded-full"
+                style={{ backgroundColor: getSeverityColor(severity) }}
+              />
+              <span className="text-muted-foreground">
+                {severityOptions?.find(opt => opt?.value === severity)?.description}
+              </span>
+            </div>
+            <div className="flex items-center space-x-2 text-sm">
+              <Icon name="Shield" size={14} className="text-primary" />
+              <span className="text-primary font-medium">
+                {severityOptions?.find(opt => opt?.value === severity)?.securityLevel}
+              </span>
+            </div>
           </div>
         )}
       </div>

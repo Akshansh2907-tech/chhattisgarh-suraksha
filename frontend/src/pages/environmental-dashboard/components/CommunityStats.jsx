@@ -1,24 +1,77 @@
 import React from 'react';
 import Icon from '../../../components/AppIcon';
+import { useAuth } from '../../../contexts/AuthContext';
+import api from '../../../utils/api';
 
 const CommunityStats = () => {
-  // Try to load dynamic community stats from local storage (prototype)
+  // Try to load dynamic community stats from server (preferred) with localStorage fallback
+  const { user } = useAuth();
   const [reportsCount, setReportsCount] = React.useState(Number(localStorage.getItem('cs_reports_count') || 0));
   const [membersCount, setMembersCount] = React.useState(Number(localStorage.getItem('cs_members_count') || 0));
   const [impactPoints, setImpactPoints] = React.useState(Number(localStorage.getItem('cs_impact_points') || 0));
 
   React.useEffect(() => {
-    const update = () => {
+    let mounted = true;
+
+    const updateFromLocal = () => {
       setReportsCount(Number(localStorage.getItem('cs_reports_count') || 0));
       setMembersCount(Number(localStorage.getItem('cs_members_count') || 0));
       setImpactPoints(Number(localStorage.getItem('cs_impact_points') || 0));
     };
 
-    window.addEventListener('cs:data-updated', update);
+    const fetchFromServer = async () => {
+      try {
+        // Get community-wide stats (reports, members, impact)
+        const communityResp = await api.get('/community/stats');
+        const community = communityResp?.data?.data || communityResp?.data || null;
+        if (mounted && community) {
+          const rc = community.reportsCount || 0;
+          const mc = community.membersCount || Number(localStorage.getItem('cs_members_count') || 0);
+          const ip = community.impactPoints || 0;
+          setReportsCount(rc);
+          setMembersCount(mc);
+          setImpactPoints(ip);
+          // persist to localStorage so other parts of the app and reloads show recent values
+          try {
+            localStorage.setItem('cs_reports_count', String(rc));
+            localStorage.setItem('cs_members_count', String(mc));
+            localStorage.setItem('cs_impact_points', String(ip));
+          } catch (e) {
+            console.warn('Could not persist community stats to localStorage', e);
+          }
+        }
+
+        // If user is authenticated, also fetch their personal stats for 'Your Impact Score'
+        if (user && user.id) {
+          try {
+            const resp = await api.get(`/users/${user.id}/stats`);
+            const stats = resp?.data?.data || resp?.data || null;
+            if (mounted && stats) {
+              // Update only the personal impact score display; community impact remains from communityResp
+              // We'll map personal impact to the 'Your Impact Score' stat
+              setImpactPoints(prev => prev); // keep community impactPoints in place
+              // For 'Your Impact Score' we place it in the fourth stat's value via a small refactor below
+              // For now store per-user impact in localStorage so the UI can read it consistently
+              localStorage.setItem('cs_your_impact', String(stats.impactScore || 0));
+            }
+          } catch (err) {
+            console.warn('Failed to fetch user stats for personal impact:', err);
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to fetch community stats, falling back to localStorage', err);
+        updateFromLocal();
+      }
+    };
+
+    window.addEventListener('cs:data-updated', fetchFromServer);
     // initial update
-    update();
-    return () => window.removeEventListener('cs:data-updated', update);
-  }, []);
+    fetchFromServer();
+    return () => {
+      mounted = false;
+      window.removeEventListener('cs:data-updated', fetchFromServer);
+    };
+  }, [user]);
 
   const stats = [
     {
@@ -51,7 +104,7 @@ const CommunityStats = () => {
     {
       id: 'score',
       title: 'Your Impact Score',
-      value: `${impactPoints}`,
+      value: `${Number(localStorage.getItem('cs_your_impact') || impactPoints)}`,
       change: '+0',
       trend: 'neutral',
       icon: 'Award',

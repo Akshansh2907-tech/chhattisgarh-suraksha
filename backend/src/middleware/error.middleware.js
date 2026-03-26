@@ -3,6 +3,16 @@ export const errorHandler = (err, req, res, next) => {
   console.log('❌ Error:', err.message);
   console.log('Stack:', err.stack);
   console.log('==================================\n');
+  // If the error object carries an explicit status, respect it (e.g., body parsing errors)
+  if (err && err.status && Number.isInteger(err.status)) {
+    const status = err.status;
+    const payload = {
+      message: err.message || 'Error',
+      error: process.env.NODE_ENV === 'development' ? err.originalError || err.message : undefined
+    };
+    if (err.errors) payload.errors = err.errors;
+    return res.status(status).json(payload);
+  }
 
   if (err.name === 'ValidationError') {
     return res.status(400).json({

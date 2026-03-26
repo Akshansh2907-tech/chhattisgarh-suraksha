@@ -5,20 +5,20 @@ import {
   getMetricsHistory,
   forceMetricsUpdate
 } from '../controllers/metrics.controller.js';
-import { authenticateToken as authenticate } from '../middleware/auth.middleware.js';
+import { authMiddleware } from '../middleware/auth.middleware.js';
 
 const router = express.Router();
 
 // Get current environmental metrics (requires auth)
-router.get('/current', authenticate, getCurrentMetrics);
+router.get('/current', authMiddleware, getCurrentMetrics);
 
 // Get active alerts (requires auth)
-router.get('/alerts', authenticate, getActiveAlerts);
+router.get('/alerts', authMiddleware, getActiveAlerts);
 
 // Get historical metrics (requires auth)
-router.get('/history', authenticate, getMetricsHistory);
+router.get('/history', authMiddleware, getMetricsHistory);
 
 // Force update metrics (admin only)
-router.post('/update', authenticate, forceMetricsUpdate);
+router.post('/update', authMiddleware, forceMetricsUpdate);
 
 export default router;

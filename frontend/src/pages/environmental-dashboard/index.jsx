@@ -7,7 +7,7 @@ import LocationSelector from '../../components/ui/LocationSelector';
 import UserStatusIndicator from '../../components/ui/UserStatusIndicator';
 import DataLayerToggle from '../../components/ui/DataLayerToggle';
 import ErrorBoundary from '../../components/ErrorBoundary';
-import { MetricsCard, MetricsCardLive } from './components/MetricsCardLive.jsx';
+import MetricsCardLive, { MetricsCard } from './components/MetricsCardLive.jsx';
 import MapWidget from './components/MapWidget';
 import AlertsWidget from './components/AlertsPanel';
 import RecommendationsSection from './components/RecommendationsSection';
@@ -19,6 +19,25 @@ import useEnvironmentalData from '../../hooks/useEnvironmentalData';
 import { formatDistanceToNow } from 'date-fns';
 import Button from '../../components/ui/Button';
 import Icon from '../../components/AppIcon';
+
+// Helper functions for safe metric processing
+const getSeverity = (aqi) => {
+  if (aqi == null) return 'neutral';
+  if (aqi >= 0 && aqi <= 50) return 'good';
+  if (aqi <= 100) return 'moderate';
+  if (aqi <= 200) return 'unhealthy';
+  return 'hazardous';
+};
+
+const getAQDescription = (metrics) => {
+  const pm25 = metrics?.pm25 != null ? Number(metrics.pm25 || 0).toFixed(2) : '—';
+  const pm10 = metrics?.pm10 != null ? Number(metrics.pm10 || 0).toFixed(2) : '—';
+  return `PM2.5 ${pm25} µg/m³ • PM10 ${pm10} µg/m³`;
+};
+
+const safeNumber = (value, defaultValue = '—') => {
+  return value != null ? Number(value || 0).toFixed(1) : defaultValue;
+};
 
 const EnvironmentalDashboard = () => {
   const { metrics, alerts, trends, loading, error, refetch } = useEnvironmentalData();
@@ -50,72 +69,47 @@ const EnvironmentalDashboard = () => {
   }, [error, loading]);
 
   // Loading state with skeleton UI that maintains layout
-  const renderLoadingState = () => (
-    <div className="min-h-screen bg-background pt-16">
-      <Header />
-      <AlertNotificationBar />
-      
-      {/* Location and User Status Bar */}
-      <div className="bg-card border-b border-border">
-        <div className="container mx-auto px-4 py-4 flex justify-between items-center">
-          <div className="flex items-center gap-4">
-            <LocationSelector />
-            <Button 
-              variant="outline" 
-              size="sm" 
-              disabled={true}
-            >
-              <Icon name="Loader2" size={16} className="animate-spin" />
-              <span className="ml-2">Loading...</span>
-            </Button>
-          </div>
-          <UserStatusIndicator />
-        </div>
-      </div>
-
-      {/* Dashboard Content */}
-      <div className="p-4 lg:p-6 space-y-6">
-        {/* Environmental Metrics Grid */}
-        <section>
-          <h2 className="text-lg font-semibold text-foreground mb-4">Real-time Environmental Data</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-            {[
-              { title: 'Air Quality Index', icon: 'Wind' },
-              { title: 'Temperature', icon: 'Thermometer' },
-              { title: 'Humidity', icon: 'Droplets' },
-              { title: 'PM2.5', icon: 'Activity' }
-            ].map((metric, index) => (
-              <MetricsCard
-                key={index}
-                title={metric.title}
-                value="—"
-                unit=""
-                icon={metric.icon}
-                trend={0}
-                severity="neutral"
-                description="Loading data..."
-                lastUpdated="updating..."
-                loading={true}
-              />
-            ))}
-          </div>
-        </section>
-
-        {/* Main Dashboard Grid */}
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-          <div className="xl:col-span-2 space-y-6">
-            <div className="h-64 bg-card border border-border rounded-lg animate-pulse"></div>
-            <div className="h-64 bg-card border border-border rounded-lg animate-pulse"></div>
-          </div>
-          <div className="space-y-6">
-            <div className="h-48 bg-card border border-border rounded-lg animate-pulse"></div>
-            <div className="h-48 bg-card border border-border rounded-lg animate-pulse"></div>
-            <div className="h-48 bg-card border border-border rounded-lg animate-pulse"></div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  const loadingMetrics = [{
+    title: 'Air Quality Index',
+    value: '—',
+    unit: 'AQI',
+    icon: 'Wind',
+    trend: 0,
+    severity: 'neutral',
+    description: 'Loading data...',
+    lastUpdated: 'updating...',
+    loading: true
+  }, {
+    title: 'Temperature',
+    value: '—',
+    unit: '°C',
+    icon: 'Thermometer',
+    trend: 0,
+    severity: 'neutral',
+    description: 'Loading data...',
+    lastUpdated: 'updating...',
+    loading: true
+  }, {
+    title: 'Humidity',
+    value: '—',
+    unit: '%',
+    icon: 'Droplets',
+    trend: 0,
+    severity: 'neutral',
+    description: 'Loading data...',
+    lastUpdated: 'updating...',
+    loading: true
+  }, {
+    title: 'PM2.5',
+    value: '—',
+    unit: 'µg/m³',
+    icon: 'Activity',
+    trend: 0,
+    severity: 'neutral',
+    description: 'Loading data...',
+    lastUpdated: 'updating...',
+    loading: true
+  }];
 
   // Handle error state
   if (dataError) {
@@ -144,17 +138,18 @@ const EnvironmentalDashboard = () => {
     );
   }
 
-  // Show loading state for initial data fetch
-  if (loading && !metrics) {
-    return renderLoadingState();
-  }
+  // For initial loading, we'll use the layout with loading metrics
+  const isInitialLoading = loading && !metrics;
 
   const handleRefresh = async () => {
     try {
       await refetch();
       toast.success('Data refreshed successfully');
+      // notify other parts of the app (if needed)
+      window.dispatchEvent(new CustomEvent('cs:data-refreshed'));
     } catch (error) {
-      toast.error('Failed to refresh data');
+      console.error('Refresh failed', error);
+      toast.error(error?.message || 'Failed to refresh data');
     }
   };
 
@@ -168,86 +163,57 @@ const EnvironmentalDashboard = () => {
 
   // Map backend metrics to card-friendly format with fallback values
   const environmentalMetrics = React.useMemo(() => {
-    // If no metrics data, return loading placeholders
-    if (!metrics) {
+    // If loading or no metrics, return loading state
+    if (loading || !metrics) {
+      return loadingMetrics;
+    }
+
+    // Process metrics if available
+    try {
+      const lastUpdatedStr = metrics.last_updated ? formatLastUpdated(metrics.last_updated) : 'just now';
+      
       return [{
         title: 'Air Quality Index',
-        value: '—',
+        value: typeof metrics.aqi === 'number' ? metrics.aqi.toFixed(0) : '—',
         unit: 'AQI',
         icon: 'Wind',
         trend: 0,
-        severity: 'neutral',
-        description: 'Loading...',
-        lastUpdated: 'updating...'
+        severity: getSeverity(metrics.aqi),
+        description: `NO₂: ${metrics.no2 || 0} • SO₂: ${metrics.so2 || 0} • O₃: ${metrics.o3 || 0}`,
+        lastUpdated: lastUpdatedStr
       }, {
         title: 'Temperature',
-        value: '—',
+        value: typeof metrics.temperature === 'number' ? metrics.temperature.toFixed(1) : '—',
         unit: '°C',
         icon: 'Thermometer',
         trend: 0,
-        severity: 'neutral',
-        description: 'Loading...',
-        lastUpdated: 'updating...'
+        severity: metrics.temperature > 40 ? 'unhealthy' : 'good',
+        description: `Pressure: ${metrics.pressure || 0} hPa`,
+        lastUpdated: lastUpdatedStr
       }, {
         title: 'Humidity',
-        value: '—',
+        value: typeof metrics.humidity === 'number' ? metrics.humidity.toFixed(0) : '—',
         unit: '%',
         icon: 'Droplets',
         trend: 0,
-        severity: 'neutral',
-        description: 'Loading...',
-        lastUpdated: 'updating...'
+        severity: 'good',
+        description: `Wind: ${metrics.wind_speed || 0} m/s ${metrics.wind_direction || 'N/A'}`,
+        lastUpdated: lastUpdatedStr
       }, {
         title: 'PM2.5',
-        value: '—',
+        value: typeof metrics.pm25 === 'number' ? metrics.pm25.toFixed(2) : '—',
         unit: 'µg/m³',
         icon: 'Activity',
         trend: 0,
-        severity: 'neutral',
-        description: 'Loading...',
-        lastUpdated: 'updating...'
+        severity: (typeof metrics.pm25 === 'number' && metrics.pm25 > 60) ? 'unhealthy' : 'moderate',
+        description: `PM10: ${metrics.pm10 || 0} µg/m³`,
+        lastUpdated: lastUpdatedStr
       }];
+    } catch (error) {
+      console.error('Error processing metrics:', error);
+      return baseMetrics;
     }
-
-    // Return actual metrics if available
-    return [{
-      title: 'Air Quality Index',
-      value: (metrics?.aqi != null) ? Number(metrics.aqi).toFixed(0) : '—',
-      unit: 'AQI',
-      icon: 'Wind',
-      trend: 0,
-      severity: (metrics?.aqi >= 0 && metrics?.aqi <= 50) ? 'good' : (metrics?.aqi <= 100 ? 'moderate' : (metrics?.aqi <= 200 ? 'unhealthy' : 'hazardous')),
-      description: `PM2.5 ${metrics?.pm25 != null ? Number(metrics.pm25).toFixed(2) : '—'} µg/m³ • PM10 ${metrics?.pm10 != null ? Number(metrics.pm10).toFixed(2) : '—'} µg/m³`,
-      lastUpdated: metrics?.last_updated ? formatLastUpdated(metrics.last_updated) : 'just now'
-    }, {
-      title: 'Temperature',
-      value: metrics?.temperature != null ? Number(metrics.temperature).toFixed(1) : '—',
-      unit: '°C',
-      icon: 'Thermometer',
-      trend: 0,
-      severity: (metrics?.temperature && metrics?.temperature > 40) ? 'unhealthy' : 'good',
-      description: 'Ambient temperature',
-      lastUpdated: metrics?.last_updated ? formatLastUpdated(metrics.last_updated) : 'just now'
-    }, {
-      title: 'Humidity',
-      value: metrics?.humidity != null ? Number(metrics.humidity).toFixed(0) : '—',
-      unit: '%',
-      icon: 'Droplets',
-      trend: 0,
-      severity: 'good',
-      description: 'Relative humidity',
-      lastUpdated: metrics?.last_updated ? formatLastUpdated(metrics.last_updated) : 'just now'
-    }, {
-      title: 'PM2.5',
-      value: metrics?.pm25 != null ? Number(metrics.pm25).toFixed(2) : '—',
-      unit: 'µg/m³',
-      icon: 'Activity',
-      trend: 0,
-      severity: (metrics?.pm25 && metrics?.pm25 > 60) ? 'unhealthy' : 'moderate',
-      description: 'Fine particulate matter',
-      lastUpdated: metrics?.last_updated ? formatLastUpdated(metrics.last_updated) : 'just now'
-    }];
-  }, [metrics, formatLastUpdated]);
+  }, [metrics, loading]);
 
   return (
     <>
@@ -284,22 +250,13 @@ const EnvironmentalDashboard = () => {
             <section>
               <h2 className="text-lg font-semibold text-foreground mb-4">Real-time Environmental Data</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-                {React.useMemo(() => (
-                  environmentalMetrics?.map((metric, index) => (
-                    <MetricsCard
-                      key={`metric-${index}`}
-                      title={metric?.title || 'Loading...'}
-                      value={metric?.value || '—'}
-                      unit={metric?.unit || ''}
-                      icon={metric?.icon || 'Loader'}
-                      trend={metric?.trend || 0}
-                      severity={metric?.severity || 'neutral'}
-                      description={metric?.description || 'Loading...'}
-                      lastUpdated={metric?.lastUpdated || 'updating...'}
-                      loading={loading}
-                    />
-                  ))
-                ), [environmentalMetrics, loading])}
+                {environmentalMetrics.map((metric, index) => (
+                  <MetricsCard
+                    key={`metric-${index}`}
+                    {...metric}
+                    loading={loading}
+                  />
+                ))}
               </div>
             </section>            {/* Main Dashboard Grid */}
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
@@ -317,23 +274,8 @@ const EnvironmentalDashboard = () => {
                 </React.Suspense>
               </div>
 
-              {/* Right Column - Live Metrics */}
+              {/* Right Column - Alerts and Additional Info */}
               <div className="space-y-6">
-                <div className="grid sm:grid-cols-2 xl:grid-cols-1 gap-6">
-                  {environmentalMetrics.map((metric, index) => (
-                    <React.Suspense key={`live-metric-${index}`} fallback={
-                      <div className="h-32 bg-card border border-border rounded-lg animate-pulse" />
-                    }>
-                      <ErrorBoundary fallback={
-                        <div className="p-4 bg-destructive/10 border border-destructive text-destructive rounded-lg">
-                          Failed to load metric
-                        </div>
-                      }>
-                        <MetricsCardLive {...metric} />
-                      </ErrorBoundary>
-                    </React.Suspense>
-                  ))}
-                </div>
                 <React.Suspense fallback={
                   <div className="h-64 bg-card border border-border rounded-lg animate-pulse" />
                 }>

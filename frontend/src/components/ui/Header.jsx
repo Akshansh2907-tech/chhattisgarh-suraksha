@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import Icon from '../AppIcon';
 import Button from './Button';
+import { useAuth } from '../../contexts/AuthContext';
 
 const Header = () => {
   const location = useLocation();
@@ -40,6 +41,8 @@ const Header = () => {
     }
   ];
 
+  const { user } = useAuth();
+
   const isActivePath = (path) => location?.pathname === path;
 
   const toggleMobileMenu = () => {
@@ -74,6 +77,21 @@ const Header = () => {
               <span>{item?.label}</span>
             </Link>
           ))}
+          {/* Municipality processing link - visible only for municipality employees */}
+          {user?.role === 'municipality' && (
+            <Link
+              to="/municipality-processing"
+              className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-300 ${
+                isActivePath('/municipality-processing')
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+              }`}
+              title="Municipality Report Processing"
+            >
+              <Icon name="Building" size={18} />
+              <span>Municipality</span>
+            </Link>
+          )}
         </nav>
 
         {/* User Profile & Mobile Menu */}

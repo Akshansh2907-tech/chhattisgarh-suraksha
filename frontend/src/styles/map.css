@@ -1,0 +1,46 @@
+/* Map Styles */
+.custom-marker {
+  background: none !important;
+}
+
+.report-marker {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  border: 2px solid white;
+  transition: transform 0.2s;
+}
+
+.report-marker:hover {
+  transform: scale(1.1);
+}
+
+.report-marker svg {
+  width: 16px;
+  height: 16px;
+}
+
+.report-popup {
+  padding: 12px;
+  max-width: 250px;
+}
+
+/* Leaflet popup customization */
+.leaflet-popup-content-wrapper {
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.leaflet-popup-content {
+  margin: 0;
+  padding: 0;
+}
+
+.leaflet-container {
+  font-family: inherit;
+}

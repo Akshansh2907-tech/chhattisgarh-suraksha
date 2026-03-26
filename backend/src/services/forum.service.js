@@ -1,4 +1,5 @@
 import Forum from '../models/forum.js';
+import { ValidationError } from '../models/forum-errors.js';
 
 class ForumService {
   // Initialize forum tables
@@ -35,32 +36,37 @@ class ForumService {
   static async createTopic(topicData, userId) {
     try {
       const { title, content, category, tags } = topicData;
-
       // Validation
+      const errors = [];
       if (!title || title.length < 10 || title.length > 200) {
-        throw new Error('Title must be between 10 and 200 characters');
+        errors.push({ field: 'title', message: 'Title must be between 10 and 200 characters' });
       }
 
-      if (!content || content.length < 50 || content.length > 10000) {
-        throw new Error('Content must be between 50 and 10000 characters');
+      if (!content || content.length < 10 || content.length > 10000) {
+        errors.push({ field: 'content', message: 'Content must be between 10 and 10000 characters' });
       }
 
       const validCategories = [
         'air_quality',
         'water_quality',
-        'green_spaces',
-        'policy',
         'sustainability',
+        'policy',
+        'green_spaces',
+        'waste_management',
         'climate_change',
-        'all'
+        'community_events'
       ];
 
       if (!category || !validCategories.includes(category)) {
-        throw new Error('Invalid category');
+        errors.push({ field: 'category', message: 'Invalid category' });
       }
 
       if (tags && tags.length > 5) {
-        throw new Error('Maximum 5 tags allowed');
+        errors.push({ field: 'tags', message: 'Maximum 5 tags allowed' });
+      }
+
+      if (errors.length > 0) {
+        throw new ValidationError(errors);
       }
 
       const topic = await Forum.createTopic({ title, content, category, tags }, userId);
@@ -141,6 +147,38 @@ class ForumService {
       return votes;
     } catch (error) {
       console.error('Error voting on topic:', error);
+      throw error;
+    }
+  }
+
+  // Get forum statistics
+  static async getForumStats() {
+    try {
+      const stats = await Forum.getForumStats();
+      return stats;
+    } catch (error) {
+      console.error('Error getting forum stats:', error);
+      throw error;
+    }
+  }
+
+  // Get top contributors
+  static async getTopContributors(limit = 10) {
+    try {
+      const contributors = await Forum.getTopContributors(limit);
+      return contributors;
+    } catch (error) {
+      console.error('Error getting top contributors:', error);
+      throw error;
+    }
+  }
+
+  // Update user's online status
+  static async updateUserOnlineStatus(userId, username) {
+    try {
+      await Forum.updateUserOnlineStatus(userId, username);
+    } catch (error) {
+      console.error('Error updating user online status:', error);
       throw error;
     }
   }

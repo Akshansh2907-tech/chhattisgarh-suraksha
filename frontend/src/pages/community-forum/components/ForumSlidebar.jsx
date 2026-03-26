@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
+import { forumAPI } from '../../../utils/forum-api';
 
 const ForumSidebar = ({ onCategorySelect, selectedCategory }) => {
   const categories = [
@@ -8,98 +9,146 @@ const ForumSidebar = ({ onCategorySelect, selectedCategory }) => {
       id: 'air_quality',
       name: 'Air Quality',
       icon: 'Wind',
-      count: 234,
+      count: 0,
       description: 'Discussions about air pollution and quality monitoring'
     },
     {
       id: 'water_quality',
       name: 'Water Quality',
       icon: 'Droplets',
-      count: 189,
+      count: 0,
       description: 'Water contamination and safety topics'
     },
     {
       id: 'sustainability',
       name: 'Sustainability Tips',
       icon: 'Recycle',
-      count: 456,
+      count: 0,
       description: 'Practical advice for sustainable living'
     },
     {
       id: 'policy',
       name: 'Policy Discussions',
       icon: 'FileText',
-      count: 123,
+      count: 0,
       description: 'Environmental policies and regulations'
     },
     {
       id: 'green_spaces',
       name: 'Green Spaces',
       icon: 'Trees',
-      count: 298,
+      count: 0,
       description: 'Urban parks and green infrastructure'
     },
     {
       id: 'waste_management',
       name: 'Waste Management',
       icon: 'Trash2',
-      count: 167,
+      count: 0,
       description: 'Waste reduction and recycling initiatives'
     },
     {
       id: 'climate_change',
       name: 'Climate Change',
       icon: 'Thermometer',
-      count: 345,
+      count: 0,
       description: 'Climate science and adaptation strategies'
     },
     {
       id: 'community_events',
       name: 'Community Events',
       icon: 'Calendar',
-      count: 89,
+      count: 0,
       description: 'Local environmental events and meetups'
     }
   ];
 
-  const topContributors = [
-    {
-      id: 1,
-      name: 'Dr. Sarah Chen',
-      avatar: 'https://images.unsplash.com/photo-1494790108755-2616b612b786?w=150',
-      badge: 'Environmental Scientist',
-      posts: 156,
-      reputation: 2840
-    },
-    {
-      id: 2,
-      name: 'Michael Rodriguez',
-      avatar: null,
-      badge: 'Climate Researcher',
-      posts: 134,
-      reputation: 2156
-    },
-    {
-      id: 3,
-      name: 'Emma Thompson',
-      avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=150',
-      badge: 'Policy Analyst',
-      posts: 98,
-      reputation: 1876
-    },
-    {
-      id: 4,
-      name: 'James Wilson',
-      avatar: null,
-      badge: 'Community Leader',
-      posts: 87,
-      reputation: 1654
-    }
-  ];
+  // top contributors will be provided by the server
+  const [topContributors, setTopContributors] = useState([]);
+  const [stats, setStats] = useState({
+    totalTopics: 0,
+    totalPosts: 0,
+    activeMembers: 0,
+    onlineNow: 0,
+    categoryCounts: {}
+  });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  // Setup online status updates
+  useEffect(() => {
+    let mounted = true;
+    let interval;
+
+    const updateOnlineStatus = async () => {
+      try {
+        if (!mounted) return;
+        await forumAPI.updateOnlineStatus();
+      } catch (error) {
+        console.error('Error updating online status:', error);
+      }
+    };
+
+    // Update every 3 minutes to stay online
+    interval = setInterval(updateOnlineStatus, 3 * 60 * 1000);
+
+    // Initial update
+    updateOnlineStatus();
+
+    return () => {
+      mounted = false;
+      if (interval) clearInterval(interval);
+    };
+  }, []);
 
   const getUserInitials = (name) => {
     return name?.split(' ')?.map(word => word?.charAt(0))?.join('')?.toUpperCase()?.slice(0, 2);
   };
+
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        
+        // Update online status first (don't fail the whole load if this errors)
+        try {
+          await forumAPI.updateOnlineStatus();
+        } catch (e) {
+          console.debug('Non-fatal: failed to update online status', e?.message || e);
+        }
+
+        // Then fetch stats and top contributors in parallel
+        const [statsRes, contribRes] = await Promise.all([
+          forumAPI.getStats(),
+          forumAPI.getTopContributors(5)
+        ]);
+
+        if (!mounted) return;
+
+        const stats = statsRes?.data?.data || {};
+        const contributors = contribRes?.data?.data || [];
+
+        setStats({
+          totalTopics: stats.total_topics || 0,
+          totalPosts: stats.total_replies || 0,
+          activeMembers: stats.total_contributors || 0,
+          onlineNow: stats.online_users || 0,
+          categoryCounts: stats.category_counts || {}
+        });
+        setTopContributors(contributors);
+      } catch (e) {
+        console.error('Failed to load forum sidebar data', e);
+        if (mounted) setError(e);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
+    load();
+    return () => { mounted = false; };
+  }, []);
 
   return (
     <div className="w-80 bg-card border-r border-border h-full overflow-y-auto">
@@ -121,9 +170,7 @@ const ForumSidebar = ({ onCategorySelect, selectedCategory }) => {
                 <Icon name="Grid3x3" size={16} />
                 <span className="font-medium">All Topics</span>
               </div>
-              <span className="text-sm">
-                {categories?.reduce((sum, cat) => sum + cat?.count, 0)}
-              </span>
+              <span className="text-sm">{stats.totalTopics || 0}</span>
             </button>
             
             {categories?.map((category) => (
@@ -145,7 +192,7 @@ const ForumSidebar = ({ onCategorySelect, selectedCategory }) => {
                     </div>
                   </div>
                 </div>
-                <span className="text-sm">{category?.count}</span>
+                <span className="text-sm">{(stats.categoryCounts && stats.categoryCounts[category.id]) ?? category.count ?? 0}</span>
               </button>
             ))}
           </div>
@@ -158,40 +205,47 @@ const ForumSidebar = ({ onCategorySelect, selectedCategory }) => {
             Top Contributors
           </h3>
           <div className="space-y-3">
-            {topContributors?.map((contributor, index) => (
-              <div
-                key={contributor?.id}
-                className="flex items-center space-x-3 p-3 rounded-lg hover:bg-muted transition-colors duration-200 cursor-pointer"
-              >
-                <div className="flex items-center space-x-2">
-                  <span className="text-sm font-medium text-muted-foreground w-4">
-                    #{index + 1}
-                  </span>
-                  {contributor?.avatar ? (
-                    <img
-                      src={contributor?.avatar}
-                      alt={contributor?.name}
-                      className="w-8 h-8 rounded-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-8 h-8 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-xs font-medium">
-                      {getUserInitials(contributor?.name)}
+            {loading ? (
+              <div className="text-sm text-muted-foreground">Loading...</div>
+            ) : error ? (
+              <div className="text-sm text-destructive">Failed to load contributors</div>
+            ) : topContributors.length === 0 ? (
+              <div className="text-sm text-muted-foreground">No contributors yet</div>
+            ) : (
+              topContributors.map((contributor, index) => (
+                <div
+                  key={contributor.id}
+                  className="flex items-center space-x-3 p-3 rounded-lg hover:bg-muted transition-colors duration-200 cursor-pointer"
+                >
+                  <div className="flex items-center space-x-2">
+                    <span className="text-sm font-medium text-muted-foreground w-4">#{index + 1}</span>
+                    {contributor.avatar ? (
+                      <img
+                        src={contributor.avatar}
+                        alt={contributor.name}
+                        className="w-8 h-8 rounded-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-8 h-8 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-xs font-medium">
+                        {getUserInitials(contributor.username)}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-sm text-foreground truncate">
+                      {contributor.username}
                     </div>
-                  )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium text-sm text-foreground truncate">
-                    {contributor?.name}
-                  </div>
-                  <div className="text-xs text-primary">{contributor?.badge}</div>
-                  <div className="flex items-center space-x-2 text-xs text-muted-foreground">
-                    <span>{contributor?.posts} posts</span>
-                    <span>•</span>
-                    <span>{contributor?.reputation} rep</span>
+                    <div className="flex items-center space-x-2 text-xs text-muted-foreground">
+                      <span>{contributor.topics} topics</span>
+                      <span>•</span>
+                      <span>{contributor.replies} replies</span>
+                      <span>•</span>
+                      <span>{contributor.reputation} rep</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
 
@@ -204,19 +258,19 @@ const ForumSidebar = ({ onCategorySelect, selectedCategory }) => {
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
               <span className="text-muted-foreground">Total Topics</span>
-              <span className="font-medium">1,901</span>
+              <span className="font-medium">{stats.totalTopics}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Total Posts</span>
-              <span className="font-medium">12,456</span>
+              <span className="font-medium">{stats.totalPosts}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Active Members</span>
-              <span className="font-medium">3,247</span>
+              <span className="font-medium">{stats.activeMembers}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Online Now</span>
-              <span className="font-medium text-success">89</span>
+              <span className="font-medium text-success">{stats.onlineNow}</span>
             </div>
           </div>
         </div>

@@ -15,93 +15,52 @@ A modern React-based project utilizing the latest frontend technologies and tool
 - **Testing** - Jest and React Testing Library setup
 
 ## 📋 Prerequisites
+## Frontend (React + Vite)
 
-- Node.js (v14.x or higher)
-- npm or yarn
+This project uses Vite + React (React 18) and Tailwind CSS. The frontend is built during the Docker build and served by nginx for the production image; during local development you can run the Vite dev server.
 
-## 🛠️ Installation
+Prerequisites:
+- Node.js 18+ and npm
 
-1. Install dependencies:
-   ```bash
-   npm install
-   # or
-   yarn install
-   ```
-   
-2. Start the development server:
-   ```bash
-   npm start
-   # or
-   yarn start
-   ```
-
-## 📁 Project Structure
-
-```
-react_app/
-├── public/             # Static assets
-├── src/
-│   ├── components/     # Reusable UI components
-│   ├── pages/          # Page components
-│   ├── styles/         # Global styles and Tailwind configuration
-│   ├── App.jsx         # Main application component
-│   ├── Routes.jsx      # Application routes
-│   └── index.jsx       # Application entry point
-├── .env                # Environment variables
-├── index.html          # HTML template
-├── package.json        # Project dependencies and scripts
-├── tailwind.config.js  # Tailwind CSS configuration
-└── vite.config.js      # Vite configuration
-```
-
-## 🧩 Adding Routes
-
-To add new routes to the application, update the `Routes.jsx` file:
-
-```jsx
-import { useRoutes } from "react-router-dom";
-import HomePage from "pages/HomePage";
-import AboutPage from "pages/AboutPage";
-
-const ProjectRoutes = () => {
-  let element = useRoutes([
-    { path: "/", element: <HomePage /> },
-    { path: "/about", element: <AboutPage /> },
-    // Add more routes as needed
-  ]);
-
-  return element;
-};
-```
-
-## 🎨 Styling
-
-This project uses Tailwind CSS for styling. The configuration includes:
-
-- Forms plugin for form styling
-- Typography plugin for text styling
-- Aspect ratio plugin for responsive elements
-- Container queries for component-specific responsive design
-- Fluid typography for responsive text
-- Animation utilities
-
-## 📱 Responsive Design
-
-The app is built with responsive design using Tailwind CSS breakpoints.
-
-
-## 📦 Deployment
-
-Build the application for production:
+Install and run (development):
 
 ```bash
+cd frontend
+npm install
+cp .env.example .env
+# If you want the frontend dev server to proxy to a local backend, set VITE_API_URL=http://localhost:5000/api in .env
+npm run dev
+```
+
+The Vite dev server runs on port 5173 by default.
+
+Build for production (static files):
+
+```bash
+cd frontend
 npm run build
 ```
 
-## 🙏 Acknowledgments
+When using the repository's Docker setup, the frontend build is automatically created and copied into an nginx image that serves the app on port `3000`.
 
-- Built with [Rocket.new](https://rocket.new)
-- Powered by React and Vite
-- Styled with Tailwind CSS
+Useful scripts (in `frontend/package.json`):
+- `npm run dev` — start Vite dev server
+- `npm run build` — produce production build (in `frontend/dist`)
+- `npm run serve` — preview production build locally via Vite preview
 
-Built with ❤️ on Rocket.new
+Notes
+- Keep `VITE_API_URL` pointing to your backend API (e.g. `http://localhost:5000/api`) during development so the frontend can call the API.
+- If you add native dependencies that require compilation (for example `sharp` for image processing), ensure the Dockerfile and CI environment include the OS packages required to build them (libvips, build-essential, etc.).
+
+Project structure (high level):
+
+```
+frontend/
+├─ src/ (React app)
+├─ public/ (static)
+├─ index.html
+├─ package.json
+└─ vite.config.js
+```
+
+If you'd like, I can add a short developer checklist for contributing to the frontend (linting, tests, local preview, design tokens).

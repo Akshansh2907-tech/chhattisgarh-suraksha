@@ -1,48 +1,76 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Icon from '../AppIcon';
 import Button from './Button';
+import { metricsAPI, auth } from '../../utils/api';
+import { toast } from 'sonner';
+import { useWebSocket } from '../../hooks/useWebSocket';
 
 const AlertNotificationBar = () => {
   const [alerts, setAlerts] = useState([]);
   const [isVisible, setIsVisible] = useState(false);
   const [currentAlertIndex, setCurrentAlertIndex] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Mock alerts data - in real app, this would come from WebSocket or API
-  const mockAlerts = [
-    {
-      id: 1,
-      type: 'warning',
-      title: 'Air Quality Alert',
-      message: 'Moderate air pollution detected in Downtown area. Sensitive individuals should limit outdoor activities.',
-      timestamp: new Date(),
-      location: 'Downtown District',
-      severity: 'moderate'
-    },
-    {
-      id: 2,
-      type: 'error',
-      title: 'Water Quality Emergency',
-      message: 'High contamination levels detected in River Park water supply. Avoid contact with water.',
-      timestamp: new Date(Date.now() - 300000), // 5 minutes ago
-      location: 'River Park',
-      severity: 'high'
-    },
-    {
-      id: 3,
-      type: 'success',
-      title: 'Air Quality Improved',
-      message: 'Air quality has returned to good levels in the Industrial Zone.',
-      timestamp: new Date(Date.now() - 600000), // 10 minutes ago
-      location: 'Industrial Zone',
-      severity: 'low'
+  // Set up WebSocket connection with authentication token
+  const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/ws?token=${auth.getToken()}`;
+  
+  const { isConnected } = useWebSocket(wsUrl, {
+    onMessage: (data) => {
+      if (data.type === 'alert') {
+        setAlerts(prev => {
+          const newAlerts = [...prev];
+          const existingIndex = newAlerts.findIndex(a => a.id === data.alert.id);
+          
+          if (existingIndex >= 0) {
+            newAlerts[existingIndex] = data.alert;
+          } else {
+            newAlerts.unshift(data.alert);
+            toast.message(data.alert.title, {
+              description: data.alert.message
+            });
+          }
+          
+          return newAlerts;
+        });
+        setIsVisible(true);
+      }
     }
-  ];
+  });
+
+  const fetchAlerts = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      const response = await metricsAPI.getActiveAlerts();
+      if (response?.data) {
+        setAlerts(response.data);
+        setIsVisible(response.data.length > 0);
+      }
+    } catch (error) {
+      console.error('Failed to fetch alerts:', error);
+      toast.error('Unable to load alerts. Will retry soon.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    // Simulate receiving alerts
-    setAlerts(mockAlerts);
-    setIsVisible(mockAlerts?.length > 0);
-  }, []);
+    // Initial fetch once
+    fetchAlerts();
+
+    // Fallback polling in case WebSocket is not connected.
+    // Use a conservative interval (60s) to avoid aggressive polling when disconnected.
+    let pollInterval = null;
+    if (!isConnected) {
+      pollInterval = setInterval(() => {
+        // Only poll when disconnected to avoid duplication when WS is active
+        if (!isConnected) fetchAlerts();
+      }, 60000); // 60s
+    }
+
+    return () => {
+      if (pollInterval) clearInterval(pollInterval);
+    };
+  }, [fetchAlerts, isConnected]);
 
   useEffect(() => {
     if (alerts?.length > 1) {
@@ -85,8 +113,10 @@ const AlertNotificationBar = () => {
   };
 
   const formatTimeAgo = (timestamp) => {
+    if (!timestamp) return '';
     const now = new Date();
-    const diff = now - timestamp;
+    const ts = new Date(timestamp);
+    const diff = now - ts;
     const minutes = Math.floor(diff / 60000);
     
     if (minutes < 1) return 'Just now';
@@ -95,6 +125,17 @@ const AlertNotificationBar = () => {
     if (hours < 24) return `${hours}h ago`;
     return `${Math.floor(hours / 24)}d ago`;
   };
+
+  if (isLoading) {
+    return (
+      <div className="fixed top-16 left-0 right-0 z-[999] border-b transition-all duration-300 bg-background/80 backdrop-blur-sm">
+        <div className="flex items-center justify-center px-4 py-2">
+          <Icon name="Loader2" size={16} className="animate-spin mr-2" />
+          <span className="text-sm">Loading alerts...</span>
+        </div>
+      </div>
+    );
+  }
 
   if (!isVisible || alerts?.length === 0) {
     return null;

@@ -1,39 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { Navigate } from 'react-router-dom';
-import { userAPI } from '../utils/api';
+import { useAuth } from '../contexts/AuthContext';
 
 const ProtectedRoute = ({ children }) => {
-  const [isLoading, setIsLoading] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const { user, loading } = useAuth();
 
-  useEffect(() => {
-    const validateToken = async () => {
-      try {
-        const token = localStorage.getItem('auth_token');
-        
-        if (!token) {
-          throw new Error('No auth token found');
-        }
-
-        // Verify token by making a request to get user profile
-        await userAPI.getProfile();
-        setIsAuthenticated(true);
-      } catch (error) {
-        console.error('Authentication failed:', error?.response?.data?.message || error.message);
-        // Clear any existing auth data
-        localStorage.removeItem('auth_token');
-        // Clear auth token using the auth API
-        setIsAuthenticated(false);
-        setIsAuthenticated(false);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    validateToken();
-  }, []);
-
-  if (isLoading) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="animate-spin text-primary">
@@ -46,7 +18,7 @@ const ProtectedRoute = ({ children }) => {
     );
   }
 
-  if (!isAuthenticated) {
+  if (!user) {
     return <Navigate to="/login" replace />;
   }
 

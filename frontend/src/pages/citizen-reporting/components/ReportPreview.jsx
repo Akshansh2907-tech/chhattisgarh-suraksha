@@ -2,6 +2,7 @@ import React from 'react';
 import Icon from '../../../components/AppIcon';
 import Image from '../../../components/AppImage';
 import Button from '../../../components/ui/Button';
+import { useAuth } from '../../../contexts/AuthContext';
 
 const ReportPreview = ({ reportData, onEdit, onSubmit, isSubmitting }) => {
   const getIssueTypeInfo = (typeId) => {
@@ -20,10 +21,10 @@ const ReportPreview = ({ reportData, onEdit, onSubmit, isSubmitting }) => {
 
   const getSeverityInfo = (severity) => {
     const severities = {
-      low: { label: 'Low Impact', color: '#059669' },
-      moderate: { label: 'Moderate Impact', color: '#D97706' },
-      high: { label: 'High Impact', color: '#DC2626' },
-      critical: { label: 'Critical Impact', color: '#7C2D12' }
+      low: { label: 'Low Security', color: '#059669', securityLevel: 'Low priority - Standard response time' },
+      moderate: { label: 'Moderate Security', color: '#D97706', securityLevel: 'Medium priority - Expedited response' },
+      high: { label: 'High Security', color: '#DC2626', securityLevel: 'High priority - Urgent response needed' },
+      critical: { label: 'Critical Security', color: '#7C2D12', securityLevel: 'Highest priority - Immediate emergency response' }
     };
     return severities?.[severity] || severities?.low;
   };
@@ -40,6 +41,8 @@ const ReportPreview = ({ reportData, onEdit, onSubmit, isSubmitting }) => {
 
   const issueType = getIssueTypeInfo(reportData?.issueType);
   const severityInfo = getSeverityInfo(reportData?.severity);
+
+  const { user } = useAuth();
 
   return (
     <div className="space-y-6">
@@ -71,18 +74,27 @@ const ReportPreview = ({ reportData, onEdit, onSubmit, isSubmitting }) => {
               <div>
                 <h4 className="font-semibold text-foreground">{issueType?.name}</h4>
                 <div className="flex items-center space-x-2">
-                  <div 
-                    className="w-2 h-2 rounded-full"
-                    style={{ backgroundColor: severityInfo?.color }}
-                  />
-                  <span className="text-sm text-muted-foreground">{severityInfo?.label}</span>
+                  <div className="flex items-center space-x-2">
+                    <div 
+                      className="w-2 h-2 rounded-full"
+                      style={{ backgroundColor: severityInfo?.color }}
+                    />
+                    <span className="text-sm text-muted-foreground">{severityInfo?.label}</span>
+                    <Icon name="Shield" size={14} className="text-primary ml-2" />
+                    <span className="text-xs text-primary font-medium">
+                      {severityInfo?.securityLevel || 'Standard priority'}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
-            <div className="text-right">
-              <div className="text-sm font-medium text-foreground">Report ID</div>
-              <div className="text-xs text-muted-foreground">#{Date.now()?.toString()?.slice(-6)}</div>
-            </div>
+              {/* Report ID will be assigned by the server */}
+              <div className="text-right">
+                <div className="text-sm font-medium text-foreground">Report ID</div>
+                <div className="text-xs text-muted-foreground">
+                  Will be assigned on submission
+                </div>
+              </div>
           </div>
         </div>
 
@@ -97,9 +109,39 @@ const ReportPreview = ({ reportData, onEdit, onSubmit, isSubmitting }) => {
             <div className="pl-6">
               <p className="text-sm text-foreground mb-1">{reportData?.location?.address}</p>
               {reportData?.location?.latitude && (
-                <p className="text-xs text-muted-foreground">
-                  Coordinates: {reportData?.location?.latitude?.toFixed(6)}, {reportData?.location?.longitude?.toFixed(6)}
-                </p>
+                <>
+                  <p className="text-xs text-muted-foreground mb-2">
+                    Coordinates: {reportData?.location?.latitude?.toFixed(6)}, {reportData?.location?.longitude?.toFixed(6)}
+                  </p>
+                  <div className="h-48 relative rounded-lg overflow-hidden border border-border">
+                    <iframe
+                      width="100%"
+                      height="100%"
+                      frameBorder="0"
+                      scrolling="no"
+                      marginHeight="0"
+                      marginWidth="0"
+                      src={`https://www.openstreetmap.org/export/embed.html?bbox=${reportData.location.longitude - 0.01}%2C${reportData.location.latitude - 0.01}%2C${reportData.location.longitude + 0.01}%2C${reportData.location.latitude + 0.01}&layer=mapnik&marker=${reportData.location.latitude}%2C${reportData.location.longitude}`}
+                    />
+                    <div className="absolute top-2 left-2 bg-card/90 backdrop-blur-sm rounded-full px-3 py-1.5 flex items-center space-x-2">
+                      <div 
+                        className="w-6 h-6 rounded-full flex items-center justify-center"
+                        style={{ backgroundColor: `${issueType?.color}15`, color: issueType?.color }}
+                      >
+                        <Icon name={issueType?.icon} size={14} />
+                      </div>
+                      <span className="text-xs font-medium text-foreground">{issueType?.name}</span>
+                    </div>
+                    <a 
+                      href={`https://www.openstreetmap.org/?mlat=${reportData.location.latitude}&mlon=${reportData.location.longitude}#map=16/${reportData.location.latitude}/${reportData.location.longitude}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="absolute bottom-2 right-2 bg-card/90 backdrop-blur-sm rounded-full px-2 py-1 text-xs font-medium text-primary hover:bg-card/100 transition-colors duration-200"
+                    >
+                      View Larger Map
+                    </a>
+                  </div>
+                </>
               )}
             </div>
           </div>
@@ -191,7 +233,22 @@ const ReportPreview = ({ reportData, onEdit, onSubmit, isSubmitting }) => {
               </div>
               <div className="flex items-center space-x-2 text-sm">
                 <span className="text-muted-foreground">Reporter:</span>
-                <span className="text-foreground">Dr. Sarah Chen</span>
+                <div className="flex items-center space-x-2">
+                  {user?.avatar ? (
+                    <img 
+                      src={user.avatar} 
+                      alt={user.name}
+                      className="w-5 h-5 rounded-full"
+                    />
+                  ) : (
+                    <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center">
+                      <Icon name="User" size={12} className="text-primary" />
+                    </div>
+                  )}
+                  <span className="text-foreground font-medium">
+                    {user?.name || 'Anonymous'}
+                  </span>
+                </div>
               </div>
             </div>
           </div>

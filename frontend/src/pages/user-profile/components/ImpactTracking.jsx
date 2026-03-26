@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 
-const ImpactTracking = ({ impactData }) => {
+const ImpactTracking = ({ impactData, recentActivities: recentActivitiesProp = [] }) => {
   const [selectedPeriod, setSelectedPeriod] = useState('month');
   const [selectedCategory, setSelectedCategory] = useState('all');
 
@@ -21,120 +21,76 @@ const ImpactTracking = ({ impactData }) => {
     { value: 'data', label: 'Data Collection', icon: 'Database' }
   ];
 
-  const achievements = [
-    {
-      id: 1,
-      title: 'Environmental Reporter',
-      description: 'Submitted 10+ environmental reports',
-      icon: 'Award',
-      earned: true,
-      earnedDate: '2024-09-15',
-      progress: 100,
-      color: 'text-success'
-    },
-    {
-      id: 2,
-      title: 'Community Leader',
-      description: 'Helped 50+ community members',
-      icon: 'Crown',
-      earned: true,
-      earnedDate: '2024-08-22',
-      progress: 100,
-      color: 'text-warning'
-    },
-    {
-      id: 3,
-      title: 'Data Collector',
-      description: 'Contributed 100+ data points',
-      icon: 'Database',
-      earned: false,
-      progress: 75,
-      color: 'text-primary'
-    },
-    {
-      id: 4,
-      title: 'Sustainability Champion',
-      description: 'Maintained 6-month active streak',
-      icon: 'Zap',
-      earned: false,
-      progress: 60,
-      color: 'text-accent'
-    }
-  ];
+  // Derive achievements from backend if available, otherwise fallback to a small placeholder
+  const achievements = (impactData?.achievements && Array.isArray(impactData.achievements))
+    ? impactData.achievements.map((a, idx) => ({
+        id: a.id || a.name || `ach-${idx}`,
+        title: a.name || a.title || 'Achievement',
+        description: a.description || '',
+        icon: a.icon || 'Award',
+        earned: !!a.achieved_at || !!a.achievedAt || false,
+        earnedDate: a.achieved_at || a.achievedAt || null,
+        progress: a.progress || (a.required_count ? Math.min(100, Math.floor((a.progress || 0) / a.required_count * 100)) : 0),
+        color: 'text-primary'
+      }))
+    : [
+        { id: 'placeholder-1', title: 'Getting Started', description: 'Participate to earn badges', icon: 'Award', earned: false, progress: 0, color: 'text-muted' }
+      ];
+
+  // Normalize stats coming from backend: the service returns reportsSubmitted, forumPosts, forumReplies, dataExports, impactScore
+  const reportsSubmitted = impactData?.reportsSubmitted || impactData?.reports_submitted || 0;
+  const forumPosts = impactData?.forumPosts || impactData?.forum_posts || 0;
+  const forumReplies = impactData?.forumReplies || impactData?.forum_replies || 0;
+  const dataExports = impactData?.dataExports || impactData?.data_exports || 0;
+  const impactScore = impactData?.impactScore || impactData?.environmentalScore || 0;
 
   const contributionStats = [
     {
       label: 'Reports Submitted',
-      value: impactData?.reportsSubmitted,
-      change: '+12%',
+      value: reportsSubmitted,
+      change: '+0%',
       trend: 'up',
       icon: 'FileText',
       color: 'text-primary'
     },
     {
       label: 'Community Interactions',
-      value: impactData?.communityInteractions,
-      change: '+8%',
+      value: forumPosts + forumReplies,
+      change: '+0%',
       trend: 'up',
       icon: 'MessageCircle',
       color: 'text-secondary'
     },
     {
       label: 'Data Points Contributed',
-      value: impactData?.dataPointsContributed,
-      change: '+25%',
+      value: dataExports,
+      change: '+0%',
       trend: 'up',
       icon: 'TrendingUp',
       color: 'text-success'
     },
     {
       label: 'Environmental Score',
-      value: impactData?.environmentalScore,
-      change: '+5%',
+      value: impactScore,
+      change: '+0%',
       trend: 'up',
       icon: 'Leaf',
       color: 'text-accent'
     }
   ];
 
-  const recentActivities = [
-    {
-      id: 1,
-      type: 'report',
-      title: 'Air Quality Report Submitted',
-      description: 'Reported poor air quality in Downtown District',
-      timestamp: '2024-10-06T14:30:00Z',
-      impact: '+15 points',
-      icon: 'Wind'
-    },
-    {
-      id: 2,
-      type: 'community',
-      title: 'Helped Community Member',
-      description: 'Answered question about water quality testing',
-      timestamp: '2024-10-05T16:45:00Z',
-      impact: '+10 points',
-      icon: 'Users'
-    },
-    {
-      id: 3,
-      type: 'data',
-      title: 'Temperature Data Contributed',
-      description: 'Submitted temperature readings for River Park',
-      timestamp: '2024-10-04T09:15:00Z',
-      impact: '+5 points',
-      icon: 'Thermometer'
-    },
-    {
-      id: 4,
-      type: 'achievement',
-      title: 'Badge Earned',
-      description: 'Earned "Environmental Reporter" badge',
-      timestamp: '2024-10-03T12:00:00Z',
-      impact: '+50 points',
-      icon: 'Award'
-    }
-  ];
+  // Use recentActivities passed from parent if available, otherwise fallback to an empty array
+  const recentActivities = (Array.isArray(recentActivitiesProp) && recentActivitiesProp.length > 0)
+    ? recentActivitiesProp.map(a => ({
+        id: a.id || a.activity_id || `${a.type}-${Math.random().toString(36).slice(2,8)}`,
+        type: a.type || a.activity_type || 'activity',
+        title: a.title || a.description || a.type || 'Activity',
+        description: a.description || a.metadata?.description || a.metadata || '',
+        timestamp: a.timestamp || a.created_at || a.createdAt || new Date().toISOString(),
+        impact: a.impact || (a.points ? `+${a.points} points` : ''),
+        icon: a.icon || (a.type === 'report' ? 'FileText' : 'Activity')
+      }))
+    : [];
 
   const formatTimeAgo = (timestamp) => {
     const now = new Date();

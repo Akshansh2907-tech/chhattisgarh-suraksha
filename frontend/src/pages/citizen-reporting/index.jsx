@@ -1,10 +1,13 @@
-import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
 import Header from '../../components/ui/Header';
 import AlertNotificationBar from '../../components/ui/AlertNotificationBar';
+import { useAuth } from '../../contexts/AuthContext';
+import { toast } from 'sonner';
 import { reportService } from '../../utils/report';
+import api from '../../utils/api';
 import { storeMedia, incrementReportCount, checkAndAwardAchievements, ACHIEVEMENTS } from '../../utils/mediaStorage';
 
 // Import components
@@ -17,9 +20,19 @@ import ReportPreview from './components/ReportPreview';
 import NearbyReports from './components/NearByReports';
 
 const CitizenReporting = () => {
+  const navigate = useNavigate();
+  const { user, loading, refreshProfile } = useAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+
+  // Check authentication
+  useEffect(() => {
+    if (!loading && !user) {
+      toast.error('Please login to submit reports');
+      navigate('/login', { state: { from: '/citizen-reporting' } });
+    }
+  }, [user, loading, navigate]);
   
   // Form data state
   const [reportData, setReportData] = useState({
@@ -83,47 +96,159 @@ const CitizenReporting = () => {
     setIsSubmitting(true);
     
     try {
-      // Store media files first
-      const reportId = `report_${Date.now()}`;
+      // Store media files first with retry logic
+      const reportIdClient = `report_${Date.now()}`;
       let mediaIds = [];
       
       if (reportData.photos.length > 0) {
-        mediaIds = await storeMedia(reportData.photos, reportId);
+        // Show immediate feedback that photos are being verified/uploaded
+        toast.info('Verifying and uploading photos. This may take a few seconds...');
+        // First try storing all photos
+        try {
+          mediaIds = await storeMedia(reportData.photos, reportIdClient);
+        } catch (mediaErr) {
+          console.warn('Initial media storage failed, trying with reduced quality:', mediaErr);
+          
+          // If that fails, try storing with reduced quality
+          try {
+            const compressedPhotos = reportData.photos.map(photo => ({
+              ...photo,
+              quality: 0.5,  // Reduce quality to 50%
+              maxWidth: 1024 // Limit max width
+            }));
+            mediaIds = await storeMedia(compressedPhotos, reportIdClient);
+          } catch (compressErr) {
+            console.error('Failed to store even compressed media:', compressErr);
+            
+            // If that also fails, try storing just one photo
+            if (reportData.photos.length > 1) {
+              try {
+                const singlePhoto = [reportData.photos[0]].map(photo => ({
+                  ...photo,
+                  quality: 0.5,
+                  maxWidth: 800
+                }));
+                mediaIds = await storeMedia(singlePhoto, reportIdClient);
+                toast.warning('Only the first photo could be saved due to storage limitations.');
+              } catch (singleErr) {
+                console.error('Failed to store even a single photo:', singleErr);
+                mediaIds = [];
+                toast.warning('Could not save photos due to storage limitations. Continuing without photos.');
+              }
+            } else {
+              mediaIds = [];
+              toast.warning('Could not save photo due to storage limitations. Continuing without photo.');
+            }
+          }
+        }
+
+        // After attempting to store media, give user feedback about uploaded vs local-fallback images
+        if (mediaIds && mediaIds.length > 0) {
+          const localFallbacks = mediaIds.filter(id => String(id).startsWith('local_'));
+          if (localFallbacks.length === 0) {
+            toast.success('Photos uploaded and verified successfully.');
+          } else {
+            toast.warning(`${localFallbacks.length} photo(s) could not be uploaded and were saved locally. They will be uploaded automatically when connectivity improves.`);
+          }
+        }
       }
       
-      // Prepare report data
+      // Format location as a string for blockchain, but also keep the structured object
+      const locationString = reportData.location 
+        ? `${reportData.location.latitude},${reportData.location.longitude}|${reportData.location.address}`
+        : '';
+      const locationObject = reportData.location || null;
+
+      // Format keywords from additional data
+      const keywords = [
+        reportData.additionalData?.keywords || '',
+        reportData.additionalData?.tags || [],
+        reportData.severity // Include severity as a keyword for search
+      ].flat().filter(Boolean).join(',');
+
+      // Prepare report data for blockchain
       const formattedReport = {
         issueType: reportData.issueType,
         description: reportData.description,
         severity: reportData.severity,
-        keywords: reportData.additionalData.keywords || '',
-        location: reportData.location ? `${reportData.location.lat},${reportData.location.lng}` : '',
+        keywords: keywords,
+        // include both structured location (so backend can save lat/lon) and a string for the chain
+        location: locationObject,
+        locationString: locationString,
         photoHash: JSON.stringify(mediaIds), // Store media IDs
         additionalData: JSON.stringify({
           ...reportData.additionalData,
-          reportId,
-          mediaIds
+          reportId: reportIdClient,
+          mediaIds,
+          accuracy: reportData.location?.accuracy,
+          source: reportData.location?.source,
+          timestamp: new Date().toISOString()
         })
       };
-      
-      // Submit to blockchain via API
+
+      // Debug: log before submitting so we can see in browser console whether the POST is attempted
+      console.log('[CitizenReporting] submitting report payload preview:', {
+        issueType: formattedReport.issueType,
+        severity: formattedReport.severity,
+        locationPresent: !!formattedReport.location,
+        locationStringPreview: String(formattedReport.locationString).slice(0,80),
+        photosCount: mediaIds.length
+      });
+
+      // Submit to backend which will insert into DB and forward to blockchain
       const response = await reportService.submitReport(formattedReport);
       
       // Increment report count and check for achievements
       const newCount = incrementReportCount();
       const newAchievements = checkAndAwardAchievements(newCount);
       
-      console.log('Report submitted with transaction:', response.txHash);
+  console.log('Report submitted with transaction:', response.txHash, 'reportId:', response.reportId);
       
       // Show achievement notification if any new ones were earned
       if (newAchievements.length > 0) {
         const achievementNames = newAchievements
           .map(id => ACHIEVEMENTS[id].name)
           .join(', ');
-        alert(`🏆 Achievement Unlocked: ${achievementNames}!`);
+        toast.success(`🏆 Achievement Unlocked: ${achievementNames}!`, {
+          duration: 5000
+        });
       }
       
-      alert('Report submitted successfully and stored securely on blockchain! You will receive updates on the investigation progress.');
+      // Show success message with report ID and points earned
+      toast.success('Report submitted successfully!', {
+        description: `Your report has been recorded with ID: ${response.reportId || 'N/A'}${response.pointsAwarded ? ` (+${response.pointsAwarded} impact points)` : ''}`,
+        duration: 5000
+      });
+
+      // Refresh profile/stats from server (if authenticated)
+      try {
+        if (user?.id && refreshProfile) {
+          await refreshProfile();
+          // Notify other parts of the app that data has changed (community stats, map markers, etc.)
+          try {
+            window.dispatchEvent(new CustomEvent('cs:data-updated'));
+          } catch (e) {
+            console.warn('Failed to dispatch cs:data-updated event', e);
+          }
+          // Optionally show a small toast indicating updated impact
+          try {
+            const statsResp = await api.get(`/users/${user.id}/stats`);
+            const stats = statsResp?.data?.data;
+            if (stats) {
+              const msg = `Reports: ${stats.reportsSubmitted} • Impact: ${stats.impactScore}`;
+              toast.info('Impact Updated!', {
+                description: msg,
+                duration: 4000
+              });
+            }
+          } catch (err) {
+            // Non-fatal: just log
+            console.warn('Could not fetch updated user stats:', err);
+          }
+        }
+      } catch (err) {
+        console.warn('Could not refresh profile after submission:', err);
+      }
       
       // Reset form
       setReportData({
@@ -138,7 +263,24 @@ const CitizenReporting = () => {
       setShowPreview(false);
     } catch (error) {
       console.error('Failed to submit report:', error);
-      alert('Failed to submit report. Please try again.');
+      
+      // Check for specific error types
+      if (error.response?.status === 401) {
+        toast.error('Your session has expired. Please login again.');
+        navigate('/login', { state: { from: '/citizen-reporting' } });
+      } else if (error.response?.status === 400) {
+        toast.error(error.response?.data?.error || 'Invalid report data. Please check your entries.');
+      } else if (error.message === 'Blockchain not initialized') {
+        toast.error('The reporting system is temporarily unavailable. Please try again in a few minutes.');
+      } else {
+        // Surface server-sent message when available to help debugging
+        const serverMsg = error.response?.data?.error || error.response?.data?.message || error.message;
+        console.error('Report submission error detail:', serverMsg, error);
+        toast.error(`Failed to submit report: ${serverMsg}`);
+      }
+
+      // Keep the form data so user doesn't lose their input
+      setShowPreview(false);
     } finally {
       setIsSubmitting(false);
     }
@@ -358,25 +500,7 @@ const CitizenReporting = () => {
                 </ul>
               </div>
 
-              {/* Emergency Contact */}
-              <div className="bg-error/5 border border-error/20 rounded-lg p-6">
-                <div className="flex items-center space-x-2 mb-3">
-                  <Icon name="AlertTriangle" size={18} className="text-error" />
-                  <h3 className="font-semibold text-error">Emergency Situations</h3>
-                </div>
-                <p className="text-sm text-muted-foreground mb-3">
-                  For immediate health or safety threats, contact emergency services first.
-                </p>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full border-error text-error hover:bg-error hover:text-error-foreground"
-                  iconName="Phone"
-                  iconPosition="left"
-                >
-                  Call 911
-                </Button>
-              </div>
+              {/* Emergency Contact removed per request */}
 
               {/* Nearby Reports */}
               <div className="bg-card border border-border rounded-lg p-6">

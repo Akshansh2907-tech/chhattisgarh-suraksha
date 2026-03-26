@@ -1,6 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
+import ReportMap from '../../../components/ReportMap';
+import { reportService } from '../../../utils/report';
+import { metricsAPI } from '../../../utils/api';
+import { useNavigate } from 'react-router-dom';
 
 const MapContainer = ({ activeLayers, selectedArea, onAreaSelect, searchLocation, onMarkerClick }) => {
   const mapRef = useRef(null);
@@ -10,73 +14,9 @@ const MapContainer = ({ activeLayers, selectedArea, onAreaSelect, searchLocation
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawingMode, setDrawingMode] = useState(null);
 
-  // Mock sensor data points around Raipur
-  const sensorData = [
-    {
-      id: 1,
-      type: 'air_quality',
-      lat: 21.2530,
-      lng: 81.6280,
-      value: 85,
-      status: 'moderate',
-      timestamp: new Date(),
-      readings: { pm25: 35, pm10: 45, no2: 25, o3: 65 }
-    },
-    {
-      id: 2,
-      type: 'noise_levels',
-      lat: 21.2490,
-      lng: 81.6310,
-      value: 72,
-      status: 'high',
-      timestamp: new Date(),
-      readings: { decibels: 72, frequency: 'mixed' }
-    },
-    {
-      id: 3,
-      type: 'water_quality',
-      lat: 21.2450,
-      lng: 81.6340,
-      value: 45,
-      status: 'poor',
-      timestamp: new Date(),
-      readings: { ph: 6.2, turbidity: 15, dissolved_oxygen: 4.5 }
-    },
-    {
-      id: 4,
-      type: 'temperature',
-      lat: 21.2560,
-      lng: 81.6260,
-      value: 33,
-      status: 'normal',
-      timestamp: new Date(),
-      readings: { celsius: 33.0, humidity: 55, heat_index: 35 }
-    }
-  ];
-
-  // Mock citizen reports near Raipur
-  const citizenReports = [
-    {
-      id: 1,
-      lat: 21.2525,
-      lng: 81.6300,
-      type: 'litter',
-      severity: 'medium',
-      description: 'Illegal dumping near market area',
-      timestamp: new Date(Date.now() - 3600000),
-      status: 'pending'
-    },
-    {
-      id: 2,
-      lat: 21.2495,
-      lng: 81.6275,
-      type: 'air_pollution',
-      severity: 'high',
-      description: 'Visible smoke from nearby factory',
-      timestamp: new Date(Date.now() - 7200000),
-      status: 'investigating'
-    }
-  ];
+  const [sensorData, setSensorData] = useState([]);
+  const [citizenReports, setCitizenReports] = useState([]);
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (searchLocation) {
@@ -85,6 +25,74 @@ const MapContainer = ({ activeLayers, selectedArea, onAreaSelect, searchLocation
       setZoomLevel(15);
     }
   }, [searchLocation]);
+
+  // Load real reports and sensor data
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        // Limit to Raipur area by default to reduce server load
+        const raipurBounds = [21.2, 81.55, 21.3, 81.7];
+        const reports = await reportService.getAllReports(raipurBounds);
+        // reports may come with location as "lat,lon|address" or coordinates
+        const parsed = (reports || []).map(r => {
+          let lat = null, lng = null;
+          if (r.coordinates) {
+            // coerce to numbers and validate
+            const maybeLat = Number(r.coordinates.lat);
+            const maybeLng = Number(r.coordinates.lon);
+            if (Number.isFinite(maybeLat) && Number.isFinite(maybeLng)) {
+              lat = maybeLat; lng = maybeLng;
+            }
+          } else if (r.location && typeof r.location === 'string') {
+            const loc = r.location.split('|')[0];
+            const parts = loc.split(',').map(Number);
+            if (parts.length >= 2 && Number.isFinite(parts[0]) && Number.isFinite(parts[1])) {
+              lat = parts[0]; lng = parts[1];
+            }
+          } else if (r.location && r.location.latitude) {
+            const maybeLat = Number(r.location.latitude);
+            const maybeLng = Number(r.location.longitude || r.location.lng);
+            if (Number.isFinite(maybeLat) && Number.isFinite(maybeLng)) {
+              lat = maybeLat; lng = maybeLng;
+            }
+          }
+          return {
+            id: r.id,
+            lat,
+            lng,
+            issueType: r.issueType || r.type || r.issue_type,
+            severity: r.severity,
+            description: r.description,
+            reporter_name: r.reporter_name || (r.additionalData && r.additionalData.reporter_name) || null,
+            timestamp: r.timestamp || (r.additionalData && r.additionalData.timestamp) || r.created_at,
+            raw: r
+          };
+        })
+          // remove entries with null/undefined and also filter NaN/infinite and out-of-range coords
+          .filter(x => x.lat != null && x.lng != null && Number.isFinite(x.lat) && Number.isFinite(x.lng) && x.lat >= -90 && x.lat <= 90 && x.lng >= -180 && x.lng <= 180);
+        setCitizenReports(parsed);
+      } catch (err) {
+        console.error('Failed to load citizen reports:', err);
+      }
+
+      try {
+        const m = await metricsAPI.getCurrentMetrics();
+        // metricsAPI returns structure: { data: { ... } } in some cases; normalize
+        const data = m?.data || m;
+        // build a simple sensorData array if available
+        const sensors = [];
+        if (data?.sensors && Array.isArray(data.sensors)) {
+          data.sensors.forEach((s, idx) => {
+            sensors.push({ id: idx + 1, type: s.type || 'air_quality', lat: s.latitude, lng: s.longitude, value: s.value, status: s.status || 'normal', timestamp: s.timestamp, readings: s.readings });
+          });
+        }
+        setSensorData(sensors);
+      } catch (err) {
+        console.warn('Failed to load sensor data:', err);
+      }
+    };
+    loadData();
+  }, []);
 
   const handleZoomIn = () => {
     setZoomLevel(prev => Math.min(prev + 1, 18));
@@ -119,57 +127,7 @@ const MapContainer = ({ activeLayers, selectedArea, onAreaSelect, searchLocation
     return colors?.[severity] || '#6B7280';
   };
 
-  const renderMarkers = () => {
-    const markers = [];
-
-    // Render sensor data markers
-    if (activeLayers?.includes('sensors')) {
-      sensorData?.forEach(sensor => {
-        if (activeLayers?.includes(sensor?.type)) {
-          markers?.push(
-            <div
-              key={`sensor-${sensor?.id}`}
-              className="absolute transform -translate-x-1/2 -translate-y-1/2 cursor-pointer"
-              style={{
-                left: `${((sensor?.lng - 81.6296) / 0.01) * 100}%`,
-                top: `${((21.2514 - sensor?.lat) / 0.01) * 100}%`
-              }}
-              onClick={() => onMarkerClick(sensor)}
-            >
-              <div
-                className="w-4 h-4 rounded-full border-2 border-white shadow-lg"
-                style={{ backgroundColor: getMarkerColor(sensor?.type, sensor?.status) }}
-              />
-            </div>
-          );
-        }
-      });
-    }
-
-    // Render citizen report markers
-    if (activeLayers?.includes('citizen_reports')) {
-      citizenReports?.forEach(report => {
-        markers?.push(
-          <div
-            key={`report-${report?.id}`}
-            className="absolute transform -translate-x-1/2 -translate-y-1/2 cursor-pointer"
-              style={{
-              left: `${((report?.lng - 81.6296) / 0.01) * 100}%`,
-              top: `${((21.2514 - report?.lat) / 0.01) * 100}%`
-            }}
-            onClick={() => onMarkerClick(report)}
-          >
-            <div
-              className="w-3 h-3 rotate-45 border-2 border-white shadow-lg"
-              style={{ backgroundColor: getReportColor(report?.severity) }}
-            />
-          </div>
-        );
-      });
-    }
-
-    return markers;
-  };
+  // We no longer manually render absolute markers here — ReportMap will render markers
 
   return (
     <div className="relative w-full h-full bg-muted overflow-hidden">
@@ -182,54 +140,22 @@ const MapContainer = ({ activeLayers, selectedArea, onAreaSelect, searchLocation
           cursor: isDrawing ? 'crosshair' : 'grab'
         }}
       >
-        {/* Google Maps Iframe */}
-        <iframe
-          width="100%"
-          height="100%"
-          loading="lazy"
-          title="Environmental Data Map"
-          referrerPolicy="no-referrer-when-downgrade"
-          src={`https://www.google.com/maps?q=${mapCenter?.lat},${mapCenter?.lng}&z=${zoomLevel}&output=embed`}
-          className="absolute inset-0"
-        />
-
-        {/* Data Layer Overlays */}
-        <div className="absolute inset-0 pointer-events-none">
-          {/* Heat Map Overlay for Air Quality */}
-          {activeLayers?.includes('air_quality') && (
-            <div className="absolute inset-0">
-              <div className="absolute top-1/3 left-1/2 w-32 h-32 bg-red-500 opacity-30 rounded-full blur-xl" />
-              <div className="absolute top-1/2 left-1/3 w-24 h-24 bg-yellow-500 opacity-25 rounded-full blur-lg" />
-              <div className="absolute bottom-1/3 right-1/3 w-20 h-20 bg-green-500 opacity-20 rounded-full blur-md" />
-            </div>
-          )}
-
-          {/* Noise Level Overlay */}
-          {activeLayers?.includes('noise_levels') && (
-            <div className="absolute inset-0">
-              <div className="absolute top-1/2 left-1/2 w-28 h-28 bg-orange-500 opacity-25 rounded-full blur-lg" />
-              <div className="absolute bottom-1/3 right-1/2 w-36 h-36 bg-red-600 opacity-20 rounded-full blur-xl" />
-            </div>
-          )}
-        </div>
-
-        {/* Interactive Markers */}
-        <div className="absolute inset-0 pointer-events-auto">
-          {renderMarkers()}
-        </div>
-
-        {/* Selected Area Overlay */}
-        {selectedArea && (
-          <div 
-            className="absolute border-2 border-primary bg-primary/10 pointer-events-none"
-            style={{
-              left: `${selectedArea?.x}%`,
-              top: `${selectedArea?.y}%`,
-              width: `${selectedArea?.width}%`,
-              height: `${selectedArea?.height}%`
-            }}
+        {/* Interactive Leaflet Map */}
+        <div className="absolute inset-0">
+          <ReportMap
+            reports={citizenReports.map(r => ({
+              id: r.id,
+              location: { latitude: r.lat, longitude: r.lng },
+              issueType: r.issueType,
+              description: r.description,
+              reporter_name: r.reporter_name,
+              timestamp: r.timestamp
+            }))}
+            center={[mapCenter.lat, mapCenter.lng]}
+            zoom={zoomLevel}
+            onMarkerClick={(r) => onMarkerClick && onMarkerClick(r)}
           />
-        )}
+        </div>
       </div>
       {/* Map Controls */}
       <div className="absolute top-4 right-4 flex flex-col space-y-2">

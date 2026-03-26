@@ -10,6 +10,7 @@ import ForumFilters from './components/ForumFilters';
 import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
 import { forumAPI } from '../../utils/forum-api';
+import { toast } from 'sonner';
 
 const CommunityForum = () => {
   const navigate = useNavigate();
@@ -26,156 +27,55 @@ const CommunityForum = () => {
   });
   const [isLoading, setIsLoading] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     loadTopics();
-  }, [selectedCategory, filters]);
+  }, [selectedCategory, filters, searchQuery]);
 
   const loadTopics = async () => {
     setIsLoading(true);
     try {
       const response = await forumAPI.getAllTopics({
-        category: selectedCategory,
+        category: selectedCategory !== 'all' ? selectedCategory : undefined,
         sort: filters.sort,
-        status: filters.status,
-        search: searchQuery
+        status: filters.status !== 'all' ? filters.status : undefined,
+        time: filters.time !== 'all' ? filters.time : undefined,
+        search: searchQuery,
+        limit: 20
       });
-      const topicsData = response.data.data.topics || [];
-      setTopics(topicsData);
-      setFilteredTopics(topicsData);
+      
+      // Extract topics from the correct response structure
+      const topicsData = response?.data?.data?.topics || [];
+      
+      // Map the topics to ensure all required fields are present
+      const processedTopics = topicsData.map(topic => ({
+        ...topic,
+        author: {
+          id: topic.author_id,
+          name: topic.author_name || 'Anonymous'
+        },
+        replyCount: parseInt(topic.reply_count) || 0,
+        upvotes: parseInt(topic.upvotes) || 0,
+        downvotes: parseInt(topic.downvotes) || 0,
+        viewCount: parseInt(topic.view_count) || 0,
+        tags: Array.isArray(topic.tags) ? topic.tags : [],
+        lastActivity: topic.updated_at || topic.created_at || new Date().toISOString(),
+        preview: topic.content ? (topic.content.length > 200 ? topic.content.substring(0, 197) + '...' : topic.content) : ''
+      }));
+
+      setTopics(processedTopics);
+      setFilteredTopics(processedTopics);
     } catch (err) {
       console.error('Failed to load topics:', err);
-      // Fallback to empty
+      // Show error notification
+      // setError('Failed to load topics. Please try again.');
       setTopics([]);
       setFilteredTopics([]);
     } finally {
       setIsLoading(false);
     }
   };
-
-  // Fallback mock data if API fails
-  const mockTopics = [
-    {
-      id: 1,
-      title: "Air Quality Monitoring in Downtown District - Need Community Input",
-      preview: "I've been tracking air quality data in the downtown area and noticed concerning patterns during rush hours. Looking for community insights and experiences.",
-      category: "air_quality",
-      author: {
-        name: "Dr. Sarah Chen",
-        avatar: "https://images.unsplash.com/photo-1494790108755-2616b612b786?w=150",
-        badge: "Environmental Scientist"
-      },
-      replyCount: 23,
-      viewCount: 156,
-      upvotes: 18,
-      downvotes: 2,
-      userVote: null,
-      lastActivity: new Date(Date.now() - 3600000), // 1 hour ago
-      isPinned: true,
-      isLocked: false,
-      tags: ["air-quality", "downtown", "monitoring", "health"]
-    },
-    {
-      id: 2,
-      title: "Successful Community Garden Project - Lessons Learned",
-      preview: "Our neighborhood successfully established a community garden that improved local air quality and brought residents together. Here\'s what we learned.",
-      category: "green_spaces",
-      author: {
-        name: "Michael Rodriguez",
-        avatar: null,
-        badge: "Community Leader"
-      },
-      replyCount: 45,
-      viewCount: 289,
-      upvotes: 34,
-      downvotes: 1,
-      userVote: "up",
-      lastActivity: new Date(Date.now() - 7200000), // 2 hours ago
-      isPinned: false,
-      isLocked: false,
-      tags: ["community-garden", "green-spaces", "success-story"]
-    },
-    {
-      id: 3,
-      title: "Water Quality Testing Results - River Park Area",
-      preview: "Recent water quality tests in River Park show improvement, but there are still concerns about industrial runoff affecting aquatic life.",
-      category: "water_quality",
-      author: {
-        name: "Emma Thompson",
-        avatar: "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=150",
-        badge: "Policy Analyst"
-      },
-      replyCount: 12,
-      viewCount: 98,
-      upvotes: 15,
-      downvotes: 0,
-      userVote: null,
-      lastActivity: new Date(Date.now() - 10800000), // 3 hours ago
-      isPinned: false,
-      isLocked: false,
-      tags: ["water-quality", "river-park", "testing", "industrial"]
-    },
-    {
-      id: 4,
-      title: "New Environmental Policy Proposal - Public Comment Period",
-      preview: "The city is proposing new environmental regulations for industrial emissions. The public comment period is open until next month.",
-      category: "policy",
-      author: {
-        name: "James Wilson",
-        avatar: null,
-        badge: "City Planner"
-      },
-      replyCount: 67,
-      viewCount: 445,
-      upvotes: 42,
-      downvotes: 8,
-      userVote: null,
-      lastActivity: new Date(Date.now() - 14400000), // 4 hours ago
-      isPinned: true,
-      isLocked: false,
-      tags: ["policy", "emissions", "public-comment", "regulations"]
-    },
-    {
-      id: 5,
-      title: "DIY Home Energy Audit - Save Money and Environment",
-      preview: "Learn how to conduct your own home energy audit to reduce consumption and environmental impact. Step-by-step guide included.",
-      category: "sustainability",
-      author: {
-        name: "Lisa Park",
-        avatar: "https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?w=150",
-        badge: "Sustainability Expert"
-      },
-      replyCount: 31,
-      viewCount: 234,
-      upvotes: 28,
-      downvotes: 2,
-      userVote: null,
-      lastActivity: new Date(Date.now() - 18000000), // 5 hours ago
-      isPinned: false,
-      isLocked: false,
-      tags: ["energy-audit", "diy", "sustainability", "home"]
-    },
-    {
-      id: 6,
-      title: "Climate Change Impact on Local Wildlife - Research Findings",
-      preview: "New research shows how climate change is affecting local bird migration patterns and what we can do to help.",
-      category: "climate_change",
-      author: {
-        name: "Dr. Robert Kim",
-        avatar: null,
-        badge: "Climate Researcher"
-      },
-      replyCount: 19,
-      viewCount: 167,
-      upvotes: 22,
-      downvotes: 1,
-      userVote: null,
-      lastActivity: new Date(Date.now() - 21600000), // 6 hours ago
-      isPinned: false,
-      isLocked: false,
-      tags: ["climate-change", "wildlife", "research", "migration"]
-    }
-  ];
 
 
   useEffect(() => {
@@ -185,54 +85,68 @@ const CommunityForum = () => {
   const filterTopics = () => {
     let filtered = [...topics];
 
-    // Filter by search query
+        // Filter by search query
     if (searchQuery) {
-      filtered = filtered?.filter(topic =>
-        topic?.title?.toLowerCase()?.includes(searchQuery?.toLowerCase()) ||
-        topic?.preview?.toLowerCase()?.includes(searchQuery?.toLowerCase()) ||
-        topic?.tags?.some(tag => tag?.toLowerCase()?.includes(searchQuery?.toLowerCase()))
+      filtered = filtered.filter(topic =>
+        (topic.title || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (topic.preview || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (topic.tags || []).some(tag => (tag || '').toLowerCase().includes(searchQuery.toLowerCase()))
       );
     }
 
     // Filter by category
     if (selectedCategory !== 'all') {
-      filtered = filtered?.filter(topic => topic?.category === selectedCategory);
+      filtered = filtered.filter(topic => topic && topic.category === selectedCategory);
     }
 
     // Filter by status
-    if (filters?.status !== 'all') {
-      switch (filters?.status) {
+    if (filters.status !== 'all') {
+      switch (filters.status) {
         case 'pinned':
-          filtered = filtered?.filter(topic => topic?.isPinned);
+          filtered = filtered.filter(topic => topic.isPinned);
           break;
         case 'locked':
-          filtered = filtered?.filter(topic => topic?.isLocked);
+          filtered = filtered.filter(topic => topic.isLocked);
           break;
         case 'unanswered':
-          filtered = filtered?.filter(topic => topic?.replyCount === 0);
+          filtered = filtered.filter(topic => topic.replyCount === 0);
           break;
         case 'solved':
-          filtered = filtered?.filter(topic => topic?.replyCount > 0 && topic?.upvotes > topic?.downvotes);
+          filtered = filtered.filter(topic => topic.replyCount > 0 && topic.upvotes > topic.downvotes);
           break;
       }
     }
 
     // Sort topics
-    switch (filters?.sort) {
+    const getSortValue = (topic, key) => {
+      if (!topic) return 0;
+      switch (key) {
+        case 'upvotes': return topic.upvotes || 0;
+        case 'downvotes': return topic.downvotes || 0;
+        case 'replyCount': return topic.replyCount || 0;
+        case 'viewCount': return topic.viewCount || 0;
+        default: return 0;
+      }
+    };
+
+    switch (filters.sort) {
       case 'popular':
-        filtered?.sort((a, b) => (b?.upvotes - b?.downvotes) - (a?.upvotes - a?.downvotes));
+        filtered.sort((a, b) => 
+          (getSortValue(b, 'upvotes') - getSortValue(b, 'downvotes')) - 
+          (getSortValue(a, 'upvotes') - getSortValue(a, 'downvotes'))
+        );
         break;
       case 'replies':
-        filtered?.sort((a, b) => b?.replyCount - a?.replyCount);
+        filtered.sort((a, b) => getSortValue(b, 'replyCount') - getSortValue(a, 'replyCount'));
         break;
       case 'views':
-        filtered?.sort((a, b) => b?.viewCount - a?.viewCount);
+        filtered.sort((a, b) => getSortValue(b, 'viewCount') - getSortValue(a, 'viewCount'));
         break;
       case 'oldest':
-        filtered?.sort((a, b) => new Date(a.lastActivity) - new Date(b.lastActivity));
+        filtered.sort((a, b) => new Date(a.lastActivity || 0) - new Date(b.lastActivity || 0));
         break;
       default: // recent
-        filtered?.sort((a, b) => new Date(b.lastActivity) - new Date(a.lastActivity));
+        filtered.sort((a, b) => new Date(b.lastActivity || Date.now()) - new Date(a.lastActivity || Date.now()));
     }
 
     setFilteredTopics(filtered);
@@ -240,56 +154,84 @@ const CommunityForum = () => {
 
   const handleCreateTopic = async (topicData) => {
     try {
-      await forumAPI.createTopic({
+      const outgoing = {
         title: topicData.title,
         content: topicData.content,
         category: topicData.category,
         tags: topicData.tags
-      });
-      // Reload topics after creation
-      loadTopics();
+      };
+
+      // Debug: log outgoing payload so we can inspect exact shape in the browser console
+      console.debug('[CreateTopic] Outgoing payload:', outgoing);
+
+      const response = await forumAPI.createTopic(outgoing);
+
+      // Close modal and show success
+      setIsCreateModalOpen(false);
+
+      // Get the newly created topic ID from the response
+      const newTopicId = response?.data?.data?.id;
+
+      // Reload topics and then navigate
+      await loadTopics();
+
+      // Show a success toast after topics are refreshed so users see confirmation
+      const createdTitle = response?.data?.data?.title || 'Topic created';
+      toast.success('Topic created', { description: `"${createdTitle}" has been posted.` });
+
+      // Navigate to the new topic if we have an ID
+      if (newTopicId) {
+        navigate(`/community-forum/topic/${newTopicId}`);
+      }
     } catch (err) {
       console.error('Failed to create topic:', err);
+      // Show error notification to user
+      // setError('Failed to create topic. Please try again.');
     }
   };
 
   const handleTopicClick = (topicId) => {
-    // In a real app, this would navigate to the topic detail page
-    console.log('Navigate to topic:', topicId);
+    navigate(`/community-forum/topic/${topicId}`);
+  };
+
+  const calculateNewVotes = (topic, oldVote, newVote) => {
+    let upvotes = topic.upvotes || 0;
+    let downvotes = topic.downvotes || 0;
+
+    // Remove old vote if exists
+    if (oldVote === 'up') upvotes--;
+    if (oldVote === 'down') downvotes--;
+
+    // Add new vote if different from old
+    if (oldVote !== newVote) {
+      if (newVote === 'up') upvotes++;
+      if (newVote === 'down') downvotes++;
+    }
+
+    return { upvotes, downvotes };
   };
 
   const handleVote = async (topicId, voteType) => {
     try {
-      await forumAPI.voteTopic(topicId, voteType);
-      // Optimistically update UI
-      setTopics(prev => prev?.map(topic => {
-        if (topic?.id === topicId) {
-          const currentVote = topic?.userVote;
-          let newUpvotes = topic?.upvotes || 0;
-          let newDownvotes = topic?.downvotes || 0;
-          let newUserVote = voteType;
-
-          if (currentVote === 'up') newUpvotes--;
-          if (currentVote === 'down') newDownvotes--;
-
-          if (currentVote === voteType) {
-            newUserVote = null;
-          } else {
-            if (voteType === 'up') newUpvotes++;
-            if (voteType === 'down') newDownvotes++;
-          }
-
+      const currentTopic = topics.find(t => t.id === topicId);
+      const oldVote = currentTopic?.userVote;
+      
+      setTopics(prev => prev.map(topic => {
+        if (topic.id === topicId) {
+          const newVotes = calculateNewVotes(topic, oldVote, voteType);
           return {
             ...topic,
-            upvotes: newUpvotes,
-            downvotes: newDownvotes,
-            userVote: newUserVote
+            ...newVotes,
+            userVote: voteType === oldVote ? null : voteType
           };
         }
         return topic;
       }));
+
+      await forumAPI.voteTopic(topicId, voteType);
     } catch (err) {
       console.error('Failed to vote:', err);
+      loadTopics();
     }
   };
 
@@ -299,8 +241,8 @@ const CommunityForum = () => {
 
   const handleFilterChange = (newFilters) => {
     setFilters(newFilters);
-    if (newFilters?.category) {
-      setSelectedCategory(newFilters?.category);
+    if (newFilters && newFilters.category) {
+      setSelectedCategory(newFilters.category);
     }
   };
 
@@ -365,7 +307,7 @@ const CommunityForum = () => {
             <div className="p-6">
               {isLoading ? (
                 <div className="space-y-4">
-                  {[...Array(6)]?.map((_, index) => (
+              {[...Array(6)].map((_, index) => (
                     <div key={index} className="bg-card border border-border rounded-lg p-6 animate-pulse">
                       <div className="flex items-center space-x-3 mb-4">
                         <div className="w-8 h-8 bg-muted rounded-full" />
@@ -383,11 +325,11 @@ const CommunityForum = () => {
                     </div>
                   ))}
                 </div>
-              ) : filteredTopics?.length > 0 ? (
+              ) : filteredTopics.length > 0 ? (
                 <div className="space-y-4">
-                  {filteredTopics?.map((topic) => (
+                  {filteredTopics.map((topic) => (
                     <TopicCard
-                      key={topic?.id}
+                      key={topic.id}
                       topic={topic}
                       onTopicClick={handleTopicClick}
                       onVote={handleVote}

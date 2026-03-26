@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { environmentalAPI } from '../utils/environmental';
+import { auth } from '../utils/api';
 
-const REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const REFRESH_INTERVAL = 30 * 60 * 1000; // 30 minutes
 const MAX_RETRIES = 3;
 const INITIAL_RETRY_DELAY = 1000;
 
@@ -38,10 +39,10 @@ export const useEnvironmentalData = () => {
     } catch (err) {
       console.error('Failed to fetch metrics:', err);
 
-      // Handle authentication errors
+      // Handle authentication errors - clear token but don't force navigation here.
       if (err.response?.status === 401 || err.response?.status === 403) {
-        localStorage.removeItem('auth_token');
-        window.location.href = '/login';
+        auth.clearToken();
+        setError('Authentication required. Please log in.');
         return;
       }
 
@@ -80,10 +81,10 @@ export const useEnvironmentalData = () => {
     } catch (err) {
       console.error('Failed to fetch alerts:', err);
 
-      // Handle authentication errors
+      // Handle authentication errors - clear token but don't redirect from a hook
       if (err.response?.status === 401 || err.response?.status === 403) {
-        localStorage.removeItem('auth_token');
-        window.location.href = '/login';
+        auth.clearToken();
+        setError('Authentication required. Please log in.');
         return;
       }
 
@@ -107,13 +108,27 @@ export const useEnvironmentalData = () => {
 
       console.log('[useEnvironmentalData] Starting data fetch...');
       
+      // Do not read localStorage here; rely on API responses for auth validation.
+
       // Fetch metrics and alerts separately to handle individual failures
       let metricsResponse, alertsResponse;
       
       try {
         metricsResponse = await environmentalAPI.getCurrentMetrics();
+        // Validate the response
+        if (!metricsResponse?.data?.success) {
+          throw new Error('Invalid metrics response format');
+        }
       } catch (metricsError) {
         console.error('Failed to fetch metrics:', metricsError);
+        
+        // Handle specific error cases
+        if (metricsError.response?.status === 401 || metricsError.response?.status === 403) {
+          auth.clearToken();
+          setError('Authentication required. Please log in.');
+          return;
+        }
+        
         // Provide fallback metrics data
         metricsResponse = {
           data: {
@@ -138,20 +153,52 @@ export const useEnvironmentalData = () => {
         alertsResponse = { data: { success: true, data: [] } };
       }
 
-      // Validate metrics response
-      if (metricsResponse?.data?.success) {
-        setMetrics(metricsResponse.data.data);
+          // Process and validate metrics response
+      const rawData = metricsResponse?.data?.data || {};
+      // Preserve nulls when backend doesn't have a value (avoid coercing null -> 0)
+      const toNumberOrNull = (v) => (v === null || v === undefined ? null : Number(v));
+
+      const processedMetrics = {
+        aqi: toNumberOrNull(rawData.aqi),
+        pm25: toNumberOrNull(rawData.pm25),
+        pm10: toNumberOrNull(rawData.pm10),
+        temperature: toNumberOrNull(rawData.temperature),
+        humidity: toNumberOrNull(rawData.humidity),
+        wind_speed: toNumberOrNull(rawData.wind_speed),
+        wind_direction: rawData.wind_direction || null,
+        precipitation: toNumberOrNull(rawData.precipitation),
+        last_updated: rawData.last_updated || new Date().toISOString(),
+        // Additional metrics
+        no2: toNumberOrNull(rawData.no2),
+        so2: toNumberOrNull(rawData.so2),
+        o3: toNumberOrNull(rawData.o3),
+        co: toNumberOrNull(rawData.co),
+        pressure: toNumberOrNull(rawData.pressure)
+      };
+      
+      // Only update metrics if we have at least some valid data
+      if (Object.values(processedMetrics).some(val => val !== null && val !== undefined)) {
+        setMetrics(processedMetrics);
       } else {
-        throw new Error('Invalid metrics response');
+        console.warn('No valid metrics data available');
+        setMetrics({
+          aqi: null,
+          pm25: null,
+          pm10: null,
+          temperature: null,
+          humidity: null,
+          wind_speed: null,
+          wind_direction: null,
+          precipitation: null,
+          last_updated: new Date().toISOString()
+        });
       }
 
-      // Validate alerts response
-      if (alertsResponse?.data?.success) {
-        setAlerts(alertsResponse.data.data || []);
-      } else {
-        console.warn('No alerts data available');
-        setAlerts([]);
-      }
+      // Process and validate alerts response
+      const processedAlerts = Array.isArray(alertsResponse?.data?.data) 
+        ? alertsResponse.data.data 
+        : [];
+      setAlerts(processedAlerts);
 
       // Reset retry count on success
       setRetryCount(0);
@@ -216,10 +263,10 @@ export const useEnvironmentalData = () => {
     } catch (err) {
       console.error('Error fetching environmental data:', err);
 
-      // Handle auth errors
+      // Handle auth errors - clear token and set an error, leave navigation to components
       if (err.response?.status === 401 || err.response?.status === 403) {
-        localStorage.removeItem('auth_token');
-        window.location.href = '/login';
+        auth.clearToken();
+        setError('Authentication required. Please log in.');
         return;
       }
 

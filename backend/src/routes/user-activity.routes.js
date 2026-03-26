@@ -5,7 +5,7 @@ import {
   trackActivity,
   getLeaderboard
 } from '../controllers/user-activity.controller.js';
-import { authenticateToken as authenticate } from '../middleware/auth.middleware.js';
+import { authMiddleware } from '../middleware/auth.middleware.js';
 
 const router = express.Router();
 
@@ -16,7 +16,7 @@ router.get('/:id/stats', getUserStats);
 router.get('/:id/activity', getUserActivity);
 
 // Track activity (requires auth - internal use)
-router.post('/activity', authenticate, trackActivity);
+router.post('/activity', authMiddleware, trackActivity);
 
 // Get leaderboard (public)
 router.get('/leaderboard', getLeaderboard);

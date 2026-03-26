@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
+import { toast } from 'sonner';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 import Input from '../../../components/ui/Input';
@@ -12,6 +13,9 @@ const CreateTopicModal = ({ isOpen, onClose, onSubmit }) => {
     tags: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState({});
+  const titleRef = useRef(null);
+  const contentRef = useRef(null);
 
   const categories = [
     { value: 'air_quality', label: 'Air Quality' },
@@ -42,11 +46,35 @@ const CreateTopicModal = ({ isOpen, onClose, onSubmit }) => {
         timestamp: new Date()?.toISOString()
       };
       
-      await onSubmit(topicData);
-      setFormData({ title: '', category: '', content: '', tags: '' });
-      onClose();
+  await onSubmit(topicData);
+  // Clear form and any existing field errors on success
+  setFormData({ title: '', category: '', content: '', tags: '' });
+  setFieldErrors({});
+  onClose();
     } catch (error) {
       console.error('Failed to create topic:', error);
+      // Show validation error to user
+      const resp = error.response?.data;
+      const errorMessage = resp?.message || error.message || 'Failed to create topic';
+
+      // If backend provided field-level errors, map them for inline display
+      if (Array.isArray(resp?.errors) && resp.errors.length > 0) {
+        const fe = {};
+        resp.errors.forEach(e => {
+          if (e.field) fe[e.field] = e.message || e.msg || 'Invalid';
+        });
+        setFieldErrors(fe);
+
+        // Focus first invalid field if available
+        if (fe.title && titleRef.current) titleRef.current.focus();
+        else if (fe.content && contentRef.current) contentRef.current.focus();
+
+        // Show combined toast
+        const combined = resp.errors.map(e => `${e.field}: ${e.message}`).join('\n');
+        toast.error(errorMessage, { description: combined });
+      } else {
+        toast.error(errorMessage);
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -75,8 +103,12 @@ const CreateTopicModal = ({ isOpen, onClose, onSubmit }) => {
             placeholder="Enter a descriptive title for your topic"
             value={formData?.title}
             onChange={(e) => handleInputChange('title', e?.target?.value)}
+            ref={titleRef}
             required
           />
+          {fieldErrors.title && (
+            <p className="text-sm text-error mt-1">{fieldErrors.title}</p>
+          )}
 
           <Select
             label="Category"
@@ -86,6 +118,9 @@ const CreateTopicModal = ({ isOpen, onClose, onSubmit }) => {
             placeholder="Select a category"
             required
           />
+          {fieldErrors.category && (
+            <p className="text-sm text-error mt-1">{fieldErrors.category}</p>
+          )}
 
           <div>
             <label className="block text-sm font-medium text-foreground mb-2">
@@ -95,10 +130,14 @@ const CreateTopicModal = ({ isOpen, onClose, onSubmit }) => {
               placeholder="Share your thoughts, questions, or insights about environmental topics..."
               value={formData?.content}
               onChange={(e) => handleInputChange('content', e?.target?.value)}
+              ref={contentRef}
               required
               rows={8}
               className="w-full px-3 py-2 text-sm bg-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring resize-none"
             />
+            {fieldErrors.content && (
+              <p className="text-sm text-error mt-1">{fieldErrors.content}</p>
+            )}
           </div>
 
           <Input
@@ -109,6 +148,16 @@ const CreateTopicModal = ({ isOpen, onClose, onSubmit }) => {
             onChange={(e) => handleInputChange('tags', e?.target?.value)}
             description="Tags help others find your topic more easily"
           />
+          {fieldErrors.tags && (
+            <p className="text-sm text-error mt-1">{fieldErrors.tags}</p>
+          )}
+
+          {/* Modal-level validation summary */}
+          {fieldErrors._global && (
+            <div className="mt-3 p-3 bg-error/10 border border-error rounded">
+              <p className="text-sm text-error">{fieldErrors._global}</p>
+            </div>
+          )}
 
           <div className="bg-muted/50 rounded-lg p-4">
             <h4 className="font-medium text-foreground mb-2 flex items-center">

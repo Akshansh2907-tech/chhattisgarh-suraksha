@@ -1,13 +1,24 @@
 import pkg from 'pg';
 const { Pool } = pkg;
 
-const pool = new Pool({
-  user: 'postgres',
-  host: 'localhost',
-  database: 'chhattisgarh_suraksha',
-  password: 'aawa_lewa',
-  port: 5432
-});
+// Support DATABASE_URL or individual PG_* env vars. When running via docker-compose
+// the compose file sets DATABASE_URL to point to the `postgres` service; prefer
+// that when available. Otherwise fall back to sensible defaults for local dev.
+const connectionString = process.env.DATABASE_URL || null;
+
+const poolConfig = connectionString
+  ? { connectionString }
+  : {
+      user: process.env.PGUSER || process.env.DB_USER || 'postgres',
+      host: process.env.PGHOST || process.env.DB_HOST || 'localhost',
+      database: process.env.PGDATABASE || process.env.DB_NAME || 'chhattisgarh_suraksha',
+      password: process.env.PGPASSWORD || process.env.DB_PASSWORD || 'postgres123',
+      port: process.env.PGPORT || process.env.DB_PORT || 5432
+    };
+
+const pool = new Pool(poolConfig);
+
+import Gamification from '../models/gamification.js';
 
 export const dbConnect = async () => {
   try {
@@ -24,6 +35,11 @@ export const dbConnect = async () => {
         address TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
+
+      -- Ensure gamification columns exist on users (added defensively)
+      ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS total_points INTEGER DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS achievements_count INTEGER DEFAULT 0;
 
       CREATE TABLE IF NOT EXISTS otps (
         id SERIAL PRIMARY KEY,
@@ -85,6 +101,31 @@ export const dbConnect = async () => {
         timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
 
+      CREATE TABLE IF NOT EXISTS media_features (
+        id BIGSERIAL PRIMARY KEY,
+        asset_id TEXT UNIQUE,
+        user_id INTEGER REFERENCES users(id),
+        report_id BIGINT REFERENCES reports(id),
+        filename TEXT,
+        url TEXT,
+        sha256 TEXT,
+        phash TEXT,
+        width INTEGER,
+        height INTEGER,
+        size INTEGER,
+        exif JSONB,
+        blur_score NUMERIC,
+        entropy NUMERIC,
+        duplicate_of_asset_id TEXT,
+        spam_score NUMERIC DEFAULT 0,
+        status VARCHAR(20) DEFAULT 'ok',
+        analysis JSONB,
+        environment_score NUMERIC,
+        ai_suspect BOOLEAN,
+        last_checked_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
       -- Drop existing table if exists
       DROP TABLE IF EXISTS real_time_metrics CASCADE;
       
@@ -103,6 +144,35 @@ export const dbConnect = async () => {
     `);
     
     console.log('Database tables initialized');
+
+    // Run forum stats migration
+    await pool.query(`
+      -- Add online users tracking table
+      CREATE TABLE IF NOT EXISTS forum_online_users (
+        user_id INTEGER PRIMARY KEY,
+        last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        username VARCHAR(100) NOT NULL
+      );
+
+      -- Add cleanup function
+      CREATE OR REPLACE FUNCTION cleanup_offline_users() RETURNS void AS $$
+      BEGIN
+        DELETE FROM forum_online_users
+        WHERE last_active < NOW() - INTERVAL '5 minutes';
+      END;
+      $$ LANGUAGE plpgsql;
+    `);
+
+    // Initialize gamification tables
+    await Gamification.createTables();
+
+    await pool.query(`
+      ALTER TABLE media_features
+      ADD COLUMN IF NOT EXISTS analysis JSONB,
+      ADD COLUMN IF NOT EXISTS environment_score NUMERIC,
+      ADD COLUMN IF NOT EXISTS ai_suspect BOOLEAN,
+      ADD COLUMN IF NOT EXISTS last_checked_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    `);
   } catch (err) {
     console.error('Database connection error:', err);
     throw err;
@@ -112,3 +182,6 @@ export const dbConnect = async () => {
 export const query = (text, params) => pool.query(text, params);
 
 export default pool;
+
+// Also provide a named export for legacy imports that expect `{ pool }`.
+export { pool };

@@ -1,11 +1,36 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 import Select from '../../../components/ui/Select';
+import api from '../../../utils/api';
 
 const AnalyticsHeader = ({ onTimeRangeChange, onDataTypeChange, onExportData }) => {
   const [selectedTimeRange, setSelectedTimeRange] = useState('7d');
   const [selectedDataType, setSelectedDataType] = useState('all');
+  const [communityStats, setCommunityStats] = useState({
+    impactPoints: 0,
+    reportsCount: 0,
+    location: 'Raipur, Chhattisgarh'
+  });
+
+  useEffect(() => {
+    const fetchCommunityStats = async () => {
+      try {
+        const response = await api.get('/community/stats');
+        if (response?.data?.success) {
+          setCommunityStats({
+            impactPoints: response.data.data.impactPoints || 0,
+            reportsCount: response.data.data.reportsCount || 0,
+            location: response.data.data.location || 'Raipur, Chhattisgarh'
+          });
+        }
+      } catch (error) {
+        console.error('Failed to fetch community stats:', error);
+      }
+    };
+
+    fetchCommunityStats();
+  }, []);
 
   const timeRangeOptions = [
     { value: '24h', label: 'Last 24 Hours' },
@@ -89,11 +114,11 @@ const AnalyticsHeader = ({ onTimeRangeChange, onDataTypeChange, onExportData }) 
         </div>
         <div className="flex items-center gap-1">
           <Icon name="Database" size={16} />
-          <span>1,247,892 data points</span>
+          <span>{communityStats.impactPoints.toLocaleString()} impact points</span>
         </div>
         <div className="flex items-center gap-1">
           <Icon name="MapPin" size={16} />
-          <span>Downtown District</span>
+          <span>{communityStats.location}</span>
         </div>
       </div>
     </div>
